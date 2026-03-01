@@ -1,0 +1,36 @@
+# OS generated files
+.DS_Store
+Thumbs.db
+# Windows Zone.Identifier files (NTFS alternate data streams)
+*:Zone.Identifier
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build outputs
+dist/
+build/
+*.o
+*.out
+
+# Environment files
+.env
+.env.local
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+*.csv
