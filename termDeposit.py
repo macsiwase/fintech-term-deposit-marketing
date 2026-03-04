@@ -6,11 +6,13 @@ app = marimo.App()
 
 @app.cell
 def _():
+    from plotly.subplots import make_subplots
     import marimo as mo
     import polars as pl
     import plotly.express as px
+    import plotly.graph_objects as go
 
-    return mo, pl, px
+    return go, make_subplots, mo, pl, px
 
 
 @app.cell
@@ -107,6 +109,12 @@ def _(mo):
 
 
 @app.cell
+def _():
+    # df.select("duration").filter(pl.col("duration") == 115).count()
+    return
+
+
+@app.cell
 def _(mo):
     mo.md(r"""
     ### Univariate Analysis
@@ -117,13 +125,40 @@ def _(mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    histograms for age, balance, duration, campaign. No need day.
+    histograms for age, balance, duration, campaign. No need day because it is not meaningful
     """)
     return
 
 
 @app.cell
-def _():
+def _(df, go, make_subplots, mo):
+    fig_hst_num = make_subplots(rows=2, cols=2)
+
+    fig_hst_num.add_trace(go.Histogram(x=df.collect()["age"]), row=1, col=1)
+    fig_hst_num.add_trace(go.Histogram(x=df.collect()["balance"]), row=1, col=2)
+    fig_hst_num.add_trace(go.Histogram(x=df.collect()["duration"]), row=2, col=1)
+    fig_hst_num.add_trace(go.Histogram(x=df.collect()["campaign"]), row=2, col=2)
+
+    fig_hst_num.update_xaxes(title_text="Age", row=1, col=1)
+    fig_hst_num.update_xaxes(title_text="Balance", row=1, col=2)
+    fig_hst_num.update_xaxes(title_text="Duration", row=2, col=1)
+    fig_hst_num.update_xaxes(title_text="Campaign", row=2, col=2)
+
+    fig_hst_num.update_yaxes(title_text="Count", row=1, col=1)
+    fig_hst_num.update_yaxes(title_text="y", row=1, col=2)
+    fig_hst_num.update_yaxes(title_text="y", row=2, col=1)
+    fig_hst_num.update_yaxes(title_text="y", row=2, col=2)
+
+    fig_hst_num.update_layout(
+        height=800,
+        width=800,
+        title_text="Histograms of Numerical Features",
+        showlegend=False,
+    )
+
+    # Change binnings so it's not automatic. Also figure out the y axis and try to get all axis the same.
+
+    mo.ui.plotly(fig_hst_num)
     return
 
 
