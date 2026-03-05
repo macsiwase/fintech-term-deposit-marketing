@@ -6,11 +6,11 @@ app = marimo.App()
 
 @app.cell
 def _():
-    from plotly.subplots import make_subplots
     import marimo as mo
     import polars as pl
     import plotly.express as px
     import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
 
     return go, make_subplots, mo, pl, px
 
@@ -101,7 +101,11 @@ def _(df, pl):
 @app.cell
 def _(mo):
     mo.md(r"""
-    92% of no's. Huge imbalance in the dataset. Is this a normal figure for marketing efforts? Also this variable states whether the client has subscribed to a term deposit; do we know if it is due to being ignored (not picking up calls) or because they said no (if duration > 0 but no contracts)?
+    92% of no's. Huge imbalance in the dataset.
+
+    Is this a normal figure for marketing efforts?
+
+    Also this variable states whether the client has subscribed to a term deposit; do we know if it is due to being ignored (not picking up calls) or because they said no (if duration > 0 but no contracts)?
 
     Let's continue and look at some plots.
     """)
@@ -123,31 +127,33 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
-    histograms for age, balance, duration, campaign. No need day because it is not meaningful
-    """)
-    return
-
-
-@app.cell
 def _(df, go, make_subplots, mo):
+    df_collected = df.collect()
+
     fig_hst_num = make_subplots(rows=2, cols=2)
 
-    fig_hst_num.add_trace(go.Histogram(x=df.collect()["age"]), row=1, col=1)
-    fig_hst_num.add_trace(go.Histogram(x=df.collect()["balance"]), row=1, col=2)
-    fig_hst_num.add_trace(go.Histogram(x=df.collect()["duration"]), row=2, col=1)
-    fig_hst_num.add_trace(go.Histogram(x=df.collect()["campaign"]), row=2, col=2)
+    fig_hst_num.add_trace(
+        go.Histogram(x=df_collected["age"], xbins=dict(size=1)), row=1, col=1
+    )
+    fig_hst_num.add_trace(
+        go.Histogram(x=df_collected["balance"], xbins=dict(size=100)), row=1, col=2
+    )
+    fig_hst_num.add_trace(
+        go.Histogram(x=df_collected["duration"], xbins=dict(size=10)), row=2, col=1
+    )
+    fig_hst_num.add_trace(
+        go.Histogram(x=df_collected["campaign"], xbins=dict(size=1)), row=2, col=2
+    )
 
     fig_hst_num.update_xaxes(title_text="Age", row=1, col=1)
-    fig_hst_num.update_xaxes(title_text="Balance", row=1, col=2)
-    fig_hst_num.update_xaxes(title_text="Duration", row=2, col=1)
-    fig_hst_num.update_xaxes(title_text="Campaign", row=2, col=2)
+    fig_hst_num.update_xaxes(title_text="Balance", row=1, col=2, range=[-800, 5000])
+    fig_hst_num.update_xaxes(title_text="Duration", row=2, col=1, range=[0, 1000])
+    fig_hst_num.update_xaxes(title_text="Campaign", row=2, col=2, range=[0, 15])
 
     fig_hst_num.update_yaxes(title_text="Count", row=1, col=1)
-    fig_hst_num.update_yaxes(title_text="y", row=1, col=2)
-    fig_hst_num.update_yaxes(title_text="y", row=2, col=1)
-    fig_hst_num.update_yaxes(title_text="y", row=2, col=2)
+    fig_hst_num.update_yaxes(title_text="Count", row=1, col=2)
+    fig_hst_num.update_yaxes(title_text="Count", row=2, col=1)
+    fig_hst_num.update_yaxes(title_text="Count", row=2, col=2)
 
     fig_hst_num.update_layout(
         height=800,
@@ -156,9 +162,33 @@ def _(df, go, make_subplots, mo):
         showlegend=False,
     )
 
-    # Change binnings so it's not automatic. Also figure out the y axis and try to get all axis the same.
-
     mo.ui.plotly(fig_hst_num)
+    return (df_collected,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    - Age: Right skewed, unimodal, peak around ages 30-35. Most customers are working age adults. Seems fine
+    - Balance: Extreme right skew. Concentrated near/at 0. Most customers have very low or no balance.
+    - Duration: Right skewed. Peak around 70-130 seconds. Most calls are short.
+    - Campaign: Discrete variable. Right skewed. Concentrated at 1-3 contacts.
+
+    **Note**: Ranges for `balance`, `duration` and `campaign` have been adjusted to better see the distribution.
+    """)
+    return
+
+
+@app.cell
+def _(df_collected, mo, pl):
+    skewness = df_collected.select(
+        pl.col("age").skew().alias("age"),
+        pl.col("balance").skew().alias("balance"),
+        pl.col("duration").skew().alias("duration"),
+        pl.col("campaign").skew().alias("campaign"),
+    )
+
+    mo.vstack([mo.md("**Skewness Coefficients**"), skewness])
     return
 
 
@@ -171,30 +201,14 @@ def _(mo):
 
 
 @app.cell
-def _(df, mo, px):
+def _(df_collected, mo, px):
     fig = px.scatter_matrix(
-        df.collect(),
-        dimensions=["age", "balance", "day", "duration", "campaign"],
+        df_collected,
+        dimensions=["age", "balance", "duration", "campaign"],
         color="y",
     )
 
     mo.ui.plotly(fig)
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    This is the initial pairwise scatter matrix of numeric features. We can understand more in our univariate and bivariate sections later.
-    """)
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
- 
-    """)
     return
 
 
