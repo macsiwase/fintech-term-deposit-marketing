@@ -217,12 +217,25 @@ def _(df, mo, pl):
 
 
 @app.cell
+def _(df, mo, pl):
+    kurtosis = df.select(
+        pl.col("age").kurtosis().alias("age"),
+        pl.col("balance").kurtosis().alias("balance"),
+        pl.col("duration").kurtosis().alias("duration"),
+        pl.col("campaign").kurtosis().alias("campaign"),
+    )
+
+    mo.vstack([mo.md("Kurtosis Coefficients"), kurtosis])
+    return
+
+
+@app.cell
 def _(mo):
     mo.md(r"""
-    - Age: Approximately symmetric (skewness ~ 0.44), unimodal, peak around ages 30-35. Most customers are working age adults. Expected.
-    - Balance: Extreme right skew (skewness ~8.26). Concentrated near or at 0. Most customers have very low or no balance.
-    - Duration: Heavy right skew (~3.17). Peak around 70-130 seconds. Most calls are short.
-    - Campaign: Discrete variable. Also heavily right skewed (~4.7). Concentrated at 1-3 contacts but some were contacted more than 20 times (max = 60+).
+    - Age: Approximately symmetric (skewness ~ 0.44), platykurtic (~-0.50) so slightly higher tails than normal, unimodal, peak around ages 30-35. Most customers are working age adults. Expected.
+    - Balance: Extreme right skew (skewness ~8.26), extreme leptokurtic (~141.8) so there are extreme outlier balances from the center. Concentrated near or at 0. Most customers have very low or no balance. This will heavily influence any model because of the large variance.
+    - Duration: Heavy right skew (~3.17). Very leptokurtic (~18.2) so heavier tails. Peak around 70-130 seconds. Most calls are short.
+    - Campaign: Discrete variable. Also heavily right skewed (~4.7). Very leptokurtic (~36.2) so again heavier tails. Concentrated at 1-3 contacts but some were contacted more than 20 times (max = 60+).
 
     **Note**: Ranges for `balance`, `duration` and `campaign` have been adjusted to better see the distributions. The data outside the clipped ranges are less thatn 7%, so the histograms are showing the vast majority of the data.
     """)
