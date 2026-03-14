@@ -322,7 +322,7 @@ def _(cat_cols, cat_counts, go, make_subplots, mo, month_sorted, pl):
     )
 
     mo.ui.plotly(fig_bar_cat)
-    return (i,)
+    return
 
 
 @app.cell
@@ -346,6 +346,14 @@ def _(mo):
 def _(mo):
     mo.md(r"""
     ### Bivariate Analysis
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    #### Categorical Features vs Target
     """)
     return
 
@@ -429,11 +437,13 @@ def _(mo):
     - Marital: Single is much higher than the average. Married is much lower. Single people are more likely to have disposable income or fewer financial commitments.
     - Housing: People with no housing loans convert higher. Makes sense since fewer financial obligations means more open to term deposits.
 
+    **Explain ML models part 1, 2 or don't mention it yet.**
+
     The above could be good signal features for our first ML model (filter out non subscribers without calling).
 
     - Loan and default: For both, 'No' volume is much higher. There's almost no variance therefore they're not good signals.
 
-    - Contact and Month: Coukd be good signals for the second ML model (keep calling target demographics. i.e. the ones more likely to subscribe). Cellular has a higher average sub rate. October and March have much higher average rates (but very small sample sizes)
+    - Contact and Month: Could be good signals for the second ML model (keep calling target demographics. i.e. the ones more likely to subscribe). Cellular has a higher average sub rate. October and March have much higher average rates (but very small sample sizes).
     """)
     return
 
@@ -447,7 +457,7 @@ def _(mo):
 
 
 @app.cell
-def _(df_collected, go, i, make_subplots, mo):
+def _(df_collected, go, make_subplots, mo):
     num_cols = ["age", "balance", "duration", "campaign"]
 
     fig_violin = make_subplots(rows=2, cols=2, subplot_titles=num_cols)
@@ -459,14 +469,9 @@ def _(df_collected, go, i, make_subplots, mo):
             subset = df_collected.filter(df_collected["y"] == y_val)
             if (
                 col_numerical == "campaign"
-            ):  # box plot for campaigns due to being a discrete variable
+            ):  # box plot for campaign due to being a discrete variable
                 fig_violin.add_trace(
-                    go.Box(
-                        y=subset[col_numerical],
-                        name=y_val,
-                        marker_color=color,
-                        showlegend=(i == 0),
-                    ),
+                    go.Box(y=subset[col_numerical], name=y_val, marker_color=color),
                     row=row_numerical,
                     col=col_idx_numerical,
                 )
@@ -478,15 +483,19 @@ def _(df_collected, go, i, make_subplots, mo):
                         marker_color=color,
                         box_visible=True,
                         meanline_visible=True,
-                        showlegend=(i == 0),
                     ),
                     row=row_numerical,
                     col=col_idx_numerical,
                 )
 
+    fig_violin.update_yaxes(title_text="Balance", row=1, col=2, range=[-800, 5000])
+    fig_violin.update_yaxes(title_text="Duration", row=2, col=1, range=[0, 1000])
+    fig_violin.update_yaxes(title_text="Campaign", row=2, col=2, range=[0, 20])
+
     fig_violin.update_layout(
         height=800,
         width=800,
+        showlegend=False,
         title_text="Numerical Features by Subscription",
     )
 
@@ -497,7 +506,10 @@ def _(df_collected, go, i, make_subplots, mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    - Age: Yes group shows a bimodal shape. Peak around 30-35 and around 55-70. No group shows a more unimodal shape. Concenrated around 30-50 range. Age alone doesn't tell us much.
+    - Age: Both 'yes' and 'no' groups have similar medians (~38-40). The 'yes' group has a slightly higher median and a larger IQR.
+    - Balance: 'yes' group has a higher median (~600) with a larger IQR. More balance implies more subs, which makes sense (more disposable income to pay for term deposits).
+    - Duration: 'yes' group has a much larger IQR but we ignore this feature due to data leakage as mentioned before.
+    - Campaign: Both groups look very similar. This feature is not a great discriminator.
     """)
     return
 
