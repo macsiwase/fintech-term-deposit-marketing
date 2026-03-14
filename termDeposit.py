@@ -170,7 +170,6 @@ def _(df_collected, go, make_subplots, mo):
     )
 
     mo.ui.plotly(fig_hst_num)
-
     return
 
 
@@ -289,7 +288,7 @@ def _(cat_counts, pl):
     )
 
     # month_sorted
-    return (month_sorted,)
+    return month_order, month_sorted
 
 
 @app.cell
@@ -323,7 +322,7 @@ def _(cat_cols, cat_counts, go, make_subplots, mo, month_sorted, pl):
     )
 
     mo.ui.plotly(fig_bar_cat)
-    return
+    return (i,)
 
 
 @app.cell
@@ -347,6 +346,158 @@ def _(mo):
 def _(mo):
     mo.md(r"""
     ### Bivariate Analysis
+    """)
+    return
+
+
+@app.cell
+def _(cat_cols, df_collected, pl):
+    cat_sub_rate = {
+        col: df_collected.group_by([col]).agg(
+            (pl.col("y") == "yes").mean().alias("subscription_rate")
+        )
+        for col in cat_cols
+    }
+    return (cat_sub_rate,)
+
+
+@app.cell
+def _():
+    # cat_sub_rate
+    return
+
+
+@app.cell
+def _(cat_cols, cat_sub_rate, go, make_subplots, mo, month_order, pl):
+    month_sub_rate_sorted = (
+        cat_sub_rate["month"]
+        .with_columns(pl.col("month").cast(pl.Enum(month_order)))
+        .sort("month")
+    )
+
+    fig_bar_cat_sub_rate = make_subplots(
+        rows=5, cols=2, subplot_titles=[*cat_cols, "", "month (chronological)"]
+    )
+
+    for i_sub_rate, col_sub_rate in enumerate(cat_cols):
+        row_sub_rate = i_sub_rate // 2 + 1  # maps idx 0,1 to row 1. Idx 2,3 to row 2, etc.
+        col_idx_sub_rate = i_sub_rate % 2 + 1
+        rates = cat_sub_rate[col_sub_rate].sort("subscription_rate", descending=True)
+        fig_bar_cat_sub_rate.add_trace(
+            go.Bar(x=rates[col_sub_rate], y=rates["subscription_rate"] * 100),
+            row=row_sub_rate,
+            col=col_idx_sub_rate,
+        )
+
+    fig_bar_cat_sub_rate.add_trace(
+        go.Bar(
+            x=month_sub_rate_sorted["month"].cast(pl.String),
+            y=month_sub_rate_sorted["subscription_rate"] * 100,
+        ),
+        row=5,
+        col=2,
+    )
+
+    fig_bar_cat_sub_rate.add_hline(
+        y=7.24,
+        line_dash="dot",
+        line_color="gray",
+        annotation_text="Overall Rate",
+        annotation_position="top right",
+        annotation_font_size=10,
+    )
+
+
+    fig_bar_cat_sub_rate.update_yaxes(title_text="subscription rate (%)")
+
+    fig_bar_cat_sub_rate.update_layout(
+        height=1200,
+        width=1000,
+        title_text="Bar Charts of Categorical Features (Subscription Rates)",
+        showlegend=False,
+    )
+
+    mo.ui.plotly(fig_bar_cat_sub_rate)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    - Job: students at 15.6% and retired at 10.5% have a much higher subscription rate than average. However we see from the previous charts that the volume of both student and retired people are not very high. Blue-collar, which represents the highest volume has a much lower conversion. Management has a pretty good conversion (high volume + high subscription rate) and technician has an average conversion. Management is in the sweet spot.
+    - Education: Tertiary is the only one above average. Clear monotonic trend. Higher education implies higher conversion.
+    - Marital: Single is much higher than the average. Married is much lower. Single people are more likely to have disposable income or fewer financial commitments.
+    - Housing: People with no housing loans convert higher. Makes sense since fewer financial obligations means more open to term deposits.
+
+    The above could be good signal features for our first ML model (filter out non subscribers without calling).
+
+    - Loan and default: For both, 'No' volume is much higher. There's almost no variance therefore they're not good signals.
+
+    - Contact and Month: Coukd be good signals for the second ML model (keep calling target demographics. i.e. the ones more likely to subscribe). Cellular has a higher average sub rate. October and March have much higher average rates (but very small sample sizes)
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    #### Numerical Features vs Target
+    """)
+    return
+
+
+@app.cell
+def _(df_collected, go, i, make_subplots, mo):
+    num_cols = ["age", "balance", "duration", "campaign"]
+
+    fig_violin = make_subplots(rows=2, cols=2, subplot_titles=num_cols)
+
+    for i_numerical, col_numerical in enumerate(num_cols):
+        row_numerical = i_numerical // 2 + 1
+        col_idx_numerical = i_numerical % 2 + 1
+        for y_val, color in [("no", "#636EFA"), ("yes", "#EF553B")]:
+            subset = df_collected.filter(df_collected["y"] == y_val)
+            if (
+                col_numerical == "campaign"
+            ):  # box plot for campaigns due to being a discrete variable
+                fig_violin.add_trace(
+                    go.Box(
+                        y=subset[col_numerical],
+                        name=y_val,
+                        marker_color=color,
+                        showlegend=(i == 0),
+                    ),
+                    row=row_numerical,
+                    col=col_idx_numerical,
+                )
+            else:
+                fig_violin.add_trace(  # Violin plot for other numerical features because they are continuous variables. Violin plots use KDE, which assumes continuity.
+                    go.Violin(
+                        y=subset[col_numerical],
+                        name=y_val,
+                        marker_color=color,
+                        box_visible=True,
+                        meanline_visible=True,
+                        showlegend=(i == 0),
+                    ),
+                    row=row_numerical,
+                    col=col_idx_numerical,
+                )
+
+    fig_violin.update_layout(
+        height=800,
+        width=800,
+        title_text="Numerical Features by Subscription",
+    )
+
+    mo.ui.plotly(fig_violin)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    - Age: Yes group shows a bimodal shape. Peak around 30-35 and around 55-70. No group shows a more unimodal shape. Concenrated around 30-50 range. Age alone doesn't tell us much.
     """)
     return
 
