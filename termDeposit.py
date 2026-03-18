@@ -55,9 +55,17 @@ def _(mo):
     - No nulls but there are a few unknowns found in some categorical features. We should investigate this.
     - Data types are as expected
     - Min balance is -8019 which seems quite high. But it could make sense if the spending habits are horrible. Also this is average over the year. The spending could be much larger in specific months and does not really represent the entire year.
-    - The std for balance seems very large but it does make sense given that the min is -8019, while the median is 407. The max is also 102,127, which contributes to the large std. Since median < mean, it is right skewed.
+    - The std for balance seems very large but it does make sense given that the min is -8019, while the median is 407. The max is also 102,127, which contributes to the large std. Since median < mean, this suggests that we have a right skewed distribution. We quantify this later.
 
     **Note**: `duration` is the length of the phone call in seconds. This is a target leakage variable because we only know the value after the call has ended. At prediction time (before calling a customer), this feature won't exist yet. It should be excluded from the final model or carefully evaluated (test with and without) otherwise it will likely inflate accuracy artificially.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### Unknowns/Nulls
     """)
     return
 
@@ -105,7 +113,7 @@ def _(mo):
     mo.md(r"""
     ~93% of no's. Huge imbalance in the dataset.
 
-    Is this a normal figure for marketing efforts??
+    Is this a normal figure for marketing efforts?
 
     Also this variable states whether the client has subscribed to a term deposit. Do we know if it's due to being ignored (not picking up calls) or because they said no (if duration > 0 but no contracts)?
 
@@ -238,7 +246,7 @@ def _(mo):
 
     - Since balance, duration and campaign have large kurtosis, standardization (z-scoring) won't fix the problem, tree based models are better suited than linear models.
 
-    **Note**: Ranges for `balance`, `duration` and `campaign` have been adjusted to better see the distributions. The data outside the clipped ranges are less thatn 7%, so the histograms are showing the vast majority of the data.
+    **Note**: Ranges for `balance`, `duration` and `campaign` have been adjusted to better see the distributions. The data outside the clipped ranges are less than 7%, so the histograms are showing the vast majority of the data.
     """)
     return
 
@@ -330,7 +338,7 @@ def _(mo):
     mo.md(r"""
     - job: Blue-collar, management and technicians have the highest counts. unknown is negligable.
     - marital: Married is the majority. Makes sense for this product.
-    - education: Secondary is highest. unknown is negligable.
+    - education: Secondary is highest. unknown is negligible.
     - default: Overwhelmingly no. Almost no variance, which likely means it won't be very useful for modeling.
     - housing: ~60/40 split.
     - loan: ~85% no. Low variance.
@@ -366,17 +374,33 @@ def _(cat_cols, df_collected, pl):
         )
         for col in cat_cols
     }
-    return (cat_sub_rate,)
+
+    overall_sub_rate = (
+        (
+            df_collected.group_by("y")
+            .len()
+            .with_columns((pl.col("len") / pl.col("len").sum() * 100).alias("percentage"))
+        )
+        .filter(pl.col("y") == "yes")
+        .select(pl.col("percentage"))
+    )
 
 
-@app.cell
-def _():
     # cat_sub_rate
-    return
+    return cat_sub_rate, overall_sub_rate
 
 
 @app.cell
-def _(cat_cols, cat_sub_rate, go, make_subplots, mo, month_order, pl):
+def _(
+    cat_cols,
+    cat_sub_rate,
+    go,
+    make_subplots,
+    mo,
+    month_order,
+    overall_sub_rate,
+    pl,
+):
     month_sub_rate_sorted = (
         cat_sub_rate["month"]
         .with_columns(pl.col("month").cast(pl.Enum(month_order)))
@@ -407,7 +431,7 @@ def _(cat_cols, cat_sub_rate, go, make_subplots, mo, month_order, pl):
     )
 
     fig_bar_cat_sub_rate.add_hline(
-        y=7.24,
+        y=overall_sub_rate[0, 0],
         line_dash="dot",
         line_color="gray",
         annotation_text="Overall Rate",
@@ -432,18 +456,16 @@ def _(cat_cols, cat_sub_rate, go, make_subplots, mo, month_order, pl):
 @app.cell
 def _(mo):
     mo.md(r"""
-    - Job: students at 15.6% and retired at 10.5% have a much higher subscription rate than average. However we see from the previous charts that the volume of both student and retired people are not very high. Blue-collar, which represents the highest volume has a much lower conversion. Management has a pretty good conversion (high volume + high subscription rate) and technician has an average conversion. Management is in the sweet spot.
+    - Job: students at 15.6% (~700 students) and retired at 10.5% have a much higher subscription rate than average. However we see from the previous charts that the volume of both student and retired people are not very high. Blue-collar, which represents the highest volume has a much lower conversion. Management (~7000 observations) has a pretty good conversion (high volume + high subscription rate) and technician has an average conversion. Management is in the sweet spot.
     - Education: Tertiary is the only one above average. Clear monotonic trend. Higher education implies higher conversion.
     - Marital: Single is much higher than the average. Married is much lower. Single people are more likely to have disposable income or fewer financial commitments.
     - Housing: People with no housing loans convert higher. Makes sense since fewer financial obligations means more open to term deposits.
 
-    **Explain ML models part 1, 2 or don't mention it yet.**
-
-    The above could be good signal features for our first ML model (filter out non subscribers without calling).
+    The above could be good signals for our ML model.
 
     - Loan and default: For both, 'No' volume is much higher. There's almost no variance therefore they're not good signals.
 
-    - Contact and Month: Could be good signals for the second ML model (keep calling target demographics. i.e. the ones more likely to subscribe). Cellular has a higher average sub rate. October and March have much higher average rates (but very small sample sizes).
+    - Contact and Month: Could be good signals for another ML model (keep calling target demographics. i.e. the ones more likely to subscribe). Cellular has a higher average sub rate. October (61% on ~160 observations) and March have much higher average rates (but very small sample sizes).
     """)
     return
 
@@ -516,13 +538,128 @@ def _(mo):
 
 @app.cell
 def _(df_collected, mo, px):
-    fig = px.scatter_matrix(
+    fig_scatter = px.scatter_matrix(
         df_collected,
         dimensions=["age", "balance", "duration", "campaign"],
         color="y",
     )
 
-    mo.ui.plotly(fig)
+    fig_scatter.update_layout(
+        height=800,
+        width=1000,
+        title_text="Scatter Matrix of Numerical Features Colored by Subscription",
+    )
+
+    mo.ui.plotly(fig_scatter)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    Scatter matrix confirms the same observations we identified earlier. That is,
+
+    - High campaign count results in mostly no subscriptions.
+
+    - Heavy overlap in age-balance (no visible boundary)
+
+    - Some separation in pairs with duration and with campaign extreme values.
+    """)
+    return
+
+
+@app.cell
+def _(df_collected, pl):
+    df_corr = df_collected.select(
+        pl.col("age", "balance", "duration", "campaign"),
+        (pl.col("y") == "yes")
+        .cast(pl.Int8)
+        .alias("y"),  # encode target variable as binary to be used for pearson correlation.
+    )
+
+    df_corr_pearson = df_corr.corr()
+
+    df_corr_spearman = df_corr.select(
+        pl.all().rank()
+    ).corr()  # Because there is no native spearman correlation method in polars, we need to implement it manually. Spearman correlation is the Pearson correlation of the rank-transformed data. So we will rank-transform each column and then compute the Pearson correlation on the ranked data.
+    return df_corr, df_corr_pearson, df_corr_spearman
+
+
+@app.cell
+def _(df_corr, df_corr_spearman, mo, px):
+    fig_corr_spearman = px.imshow(
+        df_corr_spearman,
+        y=df_corr.columns,
+        zmin=-1,
+        zmax=1,
+        color_continuous_scale="RdBu_r",
+        text_auto=".2f",
+    )
+
+    fig_corr_spearman.update_layout(
+        height=800,
+        width=800,
+        title_text="Spearman Correlation Matrix",
+    )
+
+    mo.ui.plotly(fig_corr_spearman)
+    return
+
+
+@app.cell
+def _(df_corr_pearson, df_corr_spearman, go, mo):
+    corr_cols = df_corr_pearson.columns[:-1]
+
+    fig_corr_bar = go.Figure(
+        data=[
+            go.Bar(x=corr_cols, y=df_corr_pearson.row(-1)[:-1], name="Pearson"),
+            go.Bar(x=corr_cols, y=df_corr_spearman.row(-1)[:-1], name="Spearman"),
+        ]
+    )
+
+    fig_corr_bar.update_layout(
+        height=800,
+        width=800,
+        title_text="Correlation of Numerical Features with Target Variable (y)",
+    )
+
+    mo.ui.plotly(fig_corr_bar)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    - Pearson measures linear associations and is sensitive to extreme values. Given the extreme skew we saw in our features earlier, Spearman is more robust here.
+    - Heatmap shows no strong multicollinearity between the feature variables (all near 0). This means that the features are fairly independent. `duration`'s correlation with y is strongest (0.33) but as mentioned above, we exclude it due to data leakage.
+    - The bar chart shows weak individual correlations with y (after excluding duration by the same reason as above), which implies that our ML model needs feature interactions to predict well.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### Summary
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    - No null values but some unknowns. Although there are ~32% unknown values for the `contact` feature, we will consider this as not being a problem as this data is mostly not included after the calls.
+
+    - For outliers, we will approach it more rigorously by using sensitivity analysis. This will be performed during our modeling phase.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+ 
+    """)
     return
 
 
