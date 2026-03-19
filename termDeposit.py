@@ -10,12 +10,12 @@ def _():
     import polars as pl
     import plotly.express as px
     import plotly.graph_objects as go
-    import lazypredict
+    import pandas as pd
     from plotly.subplots import make_subplots
     from lazypredict.Supervised import LazyClassifier
-    from lazypredict.Supervised import LazyRegressor
+    from sklearn.model_selection import train_test_split
 
-    return go, make_subplots, mo, pl, px
+    return LazyClassifier, go, make_subplots, mo, pd, pl, px, train_test_split
 
 
 @app.cell
@@ -681,16 +681,109 @@ def _(mo):
 
     We propose a multi layered ML system:
 
-    1. ML1 (Pre call filter): Only use features known before a call (age, job, marital, education, default, balance, housing, loan) with the goal of reducing the 40,000 customers to a targeted subset. This model will predict which customers are likely to subscribe (before the call happens).
+    1. ML1 (Pre call filter): Use features known before a call (age, job, marital, education, balance, housing, loan) with the goal of reducing the 40,000 customers to a targeted subset. This model will predict which customers are likely to subscribe (before the call happens).
     2. ML2 (Optimizer): Use features known after a call (contact, campaign, month, duration) with the goal of prioritizing high probability contacts.
     """)
     return
 
 
 @app.cell
-def _(df_collected, pl):
-    X = df_collected.select(pl.col(pl.String).exclude("y")).to_pandas()
-    y = (df_collected["y"]).to_pandas()
+def _(mo):
+    mo.md(r"""
+    ## ML 1: Pre Call Filter
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    Let's prepare the data. We need to one hot encode our categorical values for our modeling
+    """)
+    return
+
+
+@app.cell
+def _(df_collected, pd, pl, train_test_split):
+    ml1_features = ["age", "job", "marital", "education", "balance", "housing", "loan"]
+
+    X = df_collected.select(ml1_features).to_pandas()
+    y = (df_collected["y"] == "yes").cast(pl.Int8).to_pandas()
+
+    X = pd.get_dummies(
+        X, drop_first=True
+    )  # avoids dummy variable trap by dropping the first category of each categorical variable. This prevents perfect multicollinearity in linear models, which can cause issues with model estimation and interpretation.
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )  # stratify=y ensures that the train and test sets have the same proportion of positive and negative examples as the original dataset, which is important for imbalanced classification problems.
+    return X_test, X_train, y_test, y_train
+
+
+@app.cell
+def _(X_test, X_train, y_test, y_train):
+    X_train, X_test, y_train, y_test
+    return
+
+
+@app.cell
+def _(mo):
+    run_model_fit_button = mo.ui.button(
+        "Run Model Fit"
+    )  # The model fitting process can be time-consuming, so we add a button to allow users to choose when to run it.
+    run_model_fit_button
+    return (run_model_fit_button,)
+
+
+@app.cell
+def _(
+    LazyClassifier,
+    X_test,
+    X_train,
+    mo,
+    run_model_fit_button,
+    y_test,
+    y_train,
+):
+    mo.stop(
+        not run_model_fit_button.value,
+        "Click the button above to run the model fitting process for lazypredict.",
+    )
+
+    top_classifiers = LazyClassifier(verbose=0, ignore_warnings=True)
+    models, predictions = top_classifiers.fit(X_train, X_test, y_train, y_test)
+    return (models,)
+
+
+@app.cell
+def _(models):
+    models
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    - Looking at Balanced Accuracy, most models are scoring the same or very similar (~0.5, so it's basically a coin toss). Since Balanced Accuracy is the average recall per class, the models are predictingthe same class for all observations. Given our 93% 'no' majority, we can infer that the models are predicting no's for everything. Most of the models are not doing better than the DummyClassifier.
+
+    - The few models that actually learned something are: NearestCentroid (~0.59 balanced accuracy), DecisionTreeClassifier (~0.54 balanced accuracy) and ExtraTreeClassifier (~0.54 balanced accuracy) but they're also not great results. So we should fix the imbalance.
+
+    Since lazypredict only uses default parameters (not optimized), we need to pick a couple of models where we can fix the imbalance. We see that the best models are tree based models (NearestCentroid was the best but it's too simple, not tunable and does not scale well. So we can keep it as a simple baseline but it won't be our final model.)
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    Let's try to fix the imbalance by changing the class weight for models that support it and using SMOTE (synthetic minority oversampling technique) on the training set. Then compare the two methods.
+
+    For models, we can look at RandomForest (ensemble of decision trees)
+
+    </br>
+
+    **Note**: SMOTE generates synthetic minority class samples by interpolating between existing minority examples in feature space.
+    """)
     return
 
 
