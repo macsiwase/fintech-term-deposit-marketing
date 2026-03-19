@@ -10,7 +10,10 @@ def _():
     import polars as pl
     import plotly.express as px
     import plotly.graph_objects as go
+    import lazypredict
     from plotly.subplots import make_subplots
+    from lazypredict.Supervised import LazyClassifier
+    from lazypredict.Supervised import LazyRegressor
 
     return go, make_subplots, mo, pl, px
 
@@ -81,11 +84,11 @@ def _(mo):
     mo.md(r"""
     From counting the unknowns, we see that
 
-    - The unknowns in the job feature is negligable (235/40000 ~ 0.6%)
+    - The unknowns in the job feature is negligible (235/40000 ~ 0.6%)
     - Education at ~ 3.8% is manageable and
     - Contact at ~ 32% is unsettling. It's a third of our data.
 
-    It is likely that the data was just not inserted after the calls.
+    It is likely that the data was just not inserted after the calls (confirmed by the company).
 
     For now let's check the class balance.
     """)
@@ -244,7 +247,7 @@ def _(mo):
     - Duration: Heavy right skew (~3.17). Very leptokurtic (~18.2) so heavier tails. Peak around 70-130 seconds. Most calls are short.
     - Campaign: Discrete variable. Also heavily right skewed (~4.7). Very leptokurtic (~36.2) so again heavier tails. Concentrated at 1-3 contacts but some were contacted more than 20 times (max = 60+).
 
-    - Since balance, duration and campaign have large kurtosis, standardization (z-scoring) won't fix the problem, tree based models are better suited than linear models.
+    - Since balance, duration and campaign have large kurtosis. Standardization (z-scoring) uses mean and std, which are dominated by these extreme values. Therefore if linear models are used, robust scaling or log transforms would be needed. i.e. Tree based models are better suited than linear models and are naturally robust to these distributional properties.
 
     **Note**: Ranges for `balance`, `duration` and `campaign` have been adjusted to better see the distributions. The data outside the clipped ranges are less than 7%, so the histograms are showing the vast majority of the data.
     """)
@@ -336,7 +339,7 @@ def _(cat_cols, cat_counts, go, make_subplots, mo, month_sorted, pl):
 @app.cell
 def _(mo):
     mo.md(r"""
-    - job: Blue-collar, management and technicians have the highest counts. unknown is negligable.
+    - job: Blue-collar, management and technicians have the highest counts. unknown is negligible.
     - marital: Married is the majority. Makes sense for this product.
     - education: Secondary is highest. unknown is negligible.
     - default: Overwhelmingly no. Almost no variance, which likely means it won't be very useful for modeling.
@@ -463,7 +466,7 @@ def _(mo):
 
     The above could be good signals for our ML model.
 
-    - Loan and default: For both, 'No' volume is much higher. There's almost no variance therefore they're not good signals.
+    - Loan and default: Default has virtually no variance so we can drop this candidate. Loan has low variance (~85% 'no') with a modest rate difference (~7.6% no vs ~5.5% yes), weak signal.
 
     - Contact and Month: Could be good signals for another ML model (keep calling target demographics. i.e. the ones more likely to subscribe). Cellular has a higher average sub rate. October (61% on ~160 observations) and March have much higher average rates (but very small sample sizes).
     """)
@@ -557,13 +560,13 @@ def _(df_collected, mo, px):
 @app.cell
 def _(mo):
     mo.md(r"""
-    Scatter matrix confirms the same observations we identified earlier. That is,
-
     - High campaign count results in mostly no subscriptions.
 
     - Heavy overlap in age-balance (no visible boundary)
 
-    - Some separation in pairs with duration and with campaign extreme values.
+    - Some separation in pairs with duration and with campaign extreme values (weak pairwise separability).
+
+    We quantify this pairwise separability using correlation analysis next.
     """)
     return
 
@@ -648,9 +651,17 @@ def _(mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    - No null values but some unknowns. Although there are ~32% unknown values for the `contact` feature, we will consider this as not being a problem as this data is mostly not included after the calls.
+    - No null values but there are unknowns: job (~0.6%, negligible), education (3.8%, manageable), contact (32%, likely unrecorded data, not a data quality issue).
 
-    - For outliers, we will approach it more rigorously by using sensitivity analysis. This will be performed during our modeling phase.
+    - Class balance analysis reveals that there's a predominant amount of non subscribers (~93%). This requires careful handling: maybe use stratified sampling, class weights or appropriate evaluation metrics (e.g. precision-recall, F1, AUC-ROC instead of accuracy).
+
+    - Balance, duration and campaign contain extreme values (kurtosis ~36-142). Valid according to the domain and not data errors. We will approach it more rigorously by using sensitivity analysis during our modeling phase.
+
+    - Features with the strongest signals: job, education, marital status and housing.
+
+    - Weak individual correlations with the target y: all features were < 0.06 Spearman (not including duration). Feature interactions will probably be necessary and tree based ensemble methods will most likely be the best model.
+
+    - Default is dropped because it has essentially no variance.
     """)
     return
 
@@ -658,8 +669,33 @@ def _(mo):
 @app.cell
 def _(mo):
     mo.md(r"""
- 
+    # Modeling
     """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    Since there are only ~7% of customers that have subscribed, we should focus on helping the company be more efficient and save cost (time) (i.e. not wasting time calling people who are likely not going to be customers) while retaining their most loyal subscribers.
+
+    We propose a multi layered ML system:
+
+    1. ML1 (Pre call filter): Only use features known before a call (age, job, marital, education, default, balance, housing, loan) with the goal of reducing the 40,000 customers to a targeted subset. This model will predict which customers are likely to subscribe (before the call happens).
+    2. ML2 (Optimizer): Use features known after a call (contact, campaign, month, duration) with the goal of prioritizing high probability contacts.
+    """)
+    return
+
+
+@app.cell
+def _(df_collected, pl):
+    X = df_collected.select(pl.col(pl.String).exclude("y")).to_pandas()
+    y = (df_collected["y"]).to_pandas()
+    return
+
+
+@app.cell
+def _():
     return
 
 
