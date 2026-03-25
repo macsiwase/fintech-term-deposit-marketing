@@ -261,7 +261,6 @@ def _(mo):
     - Balance: Extreme right skew (skewness ~8.26), extreme leptokurtic (~141.8) so there are extreme outlier balances from the center. Concentrated near or at 0. Most customers have very low or no balance. This will heavily influence any model because of the large variance.
     - Duration: Heavy right skew (~3.17). Very leptokurtic (~18.2) so heavier tails. Peak around 70-130 seconds. Most calls are short.
     - Campaign: Discrete variable. Also heavily right skewed (~4.7). Very leptokurtic (~36.2) so again heavier tails. Concentrated at 1-3 contacts but some were contacted more than 20 times (max = 60+).
-
     - Since balance, duration and campaign have large kurtosis. Standardization (z-scoring) uses mean and std, which are dominated by these extreme values. Therefore if linear models are used, robust scaling or log transforms would be needed. i.e. Tree based models are better suited than linear models and are naturally robust to these distributional properties.
 
     **Note**: Ranges for `balance`, `duration` and `campaign` have been adjusted to better see the distributions. The data outside the clipped ranges are less than 7%, so the histograms are showing the vast majority of the data.
@@ -482,7 +481,6 @@ def _(mo):
     The above could be good signals for our ML model.
 
     - Loan and default: Default has virtually no variance so we can drop this candidate. Loan has low variance (~85% 'no') with a modest rate difference (~7.6% no vs ~5.5% yes), weak signal.
-
     - Contact and Month: Could be good signals for another ML model (keep calling target demographics. i.e. the ones more likely to subscribe). Cellular has a higher average sub rate. October (61% on ~160 observations) and March have much higher average rates (but very small sample sizes).
     """)
     return
@@ -576,9 +574,7 @@ def _(df_collected, mo, px):
 def _(mo):
     mo.md(r"""
     - High campaign count results in mostly no subscriptions.
-
     - Heavy overlap in age-balance (no visible boundary)
-
     - Some separation in pairs with duration and with campaign extreme values (weak pairwise separability).
 
     We quantify this pairwise separability using correlation analysis next.
@@ -789,7 +785,6 @@ def _(models):
 def _(mo):
     mo.md(r"""
     - Looking at Balanced Accuracy, most models are scoring the same or very similar (~0.5, so it's basically a coin toss). Since Balanced Accuracy is the average recall per class, the models are predicting the same class for all observations. Given our 93% 'no' majority, we can infer that the models are predicting no's for everything. Most of the models are not doing better than the DummyClassifier.
-
     - The few models that actually learned something are: NearestCentroid (~0.59 balanced accuracy), DecisionTreeClassifier (~0.54 balanced accuracy) and ExtraTreeClassifier (~0.54 balanced accuracy) but they're also not great results. So we should fix the imbalance.
 
     Since LazyPredict only uses default parameters (not optimized), we select tree based models (RandomForestClassifier, ExtraTreesClassifier. RandomForest is an ensemble of DecisionTrees) for further development. These models are naturally robust to heavy tailed distributions and outliers.
