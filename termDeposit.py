@@ -16,18 +16,23 @@ def _():
     from sklearn.model_selection import train_test_split
     from imblearn.under_sampling import RandomUnderSampler
     from sklearn.ensemble import RandomForestClassifier
-    from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+    from sklearn.metrics import confusion_matrix
+    from sklearn.metrics import precision_recall_curve
+    from imblearn.combine import SMOTETomek, SMOTEENN
 
     return (
         LazyClassifier,
         RandomForestClassifier,
         RandomUnderSampler,
+        SMOTEENN,
+        SMOTETomek,
         confusion_matrix,
         go,
         make_subplots,
         mo,
         pd,
         pl,
+        precision_recall_curve,
         px,
         train_test_split,
     )
@@ -457,12 +462,12 @@ def _(
     )
 
 
-    fig_bar_cat_sub_rate.update_yaxes(title_text="subscription rate (%)")
+    fig_bar_cat_sub_rate.update_yaxes(title_text="Subscription rate (%)")
 
     fig_bar_cat_sub_rate.update_layout(
         height=1200,
         width=1000,
-        title_text="Bar Charts of Categorical Features (Subscription Rates)",
+        title_text="Categorical Features by Subscription",
         showlegend=False,
     )
 
@@ -728,19 +733,15 @@ def _(df_collected, pd, pl, train_test_split):
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )  # stratify=y ensures that the train and test sets have the same proportion of positive and negative examples as the original dataset, which is important for imbalanced classification problems.
+
+    # X_train, X_test, y_train, y_test
     return X_test, X_train, y_test, y_train
-
-
-@app.cell
-def _(X_test, X_train, y_test, y_train):
-    X_train, X_test, y_train, y_test
-    return
 
 
 @app.cell
 def _(mo):
     mo.md(r"""
-    #### LazyPredict to observe suggested models
+    #### LazyPredict
     """)
     return
 
@@ -784,12 +785,13 @@ def _(models):
 @app.cell
 def _(mo):
     mo.md(r"""
-    - Looking at Balanced Accuracy, most models are scoring the same or very similar (~0.5, so it's basically a coin toss). Since Balanced Accuracy is the average recall per class, the models are predicting the same class for all observations. Given our 93% 'no' majority, we can infer that the models are predicting no's for everything. Most of the models are not doing better than the DummyClassifier.
-    - The few models that actually learned something are: NearestCentroid (~0.59 balanced accuracy), DecisionTreeClassifier (~0.54 balanced accuracy) and ExtraTreeClassifier (~0.54 balanced accuracy) but they're also not great results. So we should fix the imbalance.
+    - Looking at Balanced Accuracy, most models are scoring the same or very similar (~0.5, so it's basically a coin toss). Since Balanced Accuracy is the unweighted average recall per class, the models are predicting the same class for all observations. Given our 93% 'no' majority, we can infer that the models are predicting no's for everything. Most of the models are not doing better than the DummyClassifier.
+    - We also notice that recall has the same results as accuracy. This is because LazyPredict uses weighted average recall, which tends to accuracy when a model predicts only one class. This shows that accuracy is misleading for this imbalanced datasets.
+    - The few models that actually learned something are: NearestCentroid (~0.59 balanced accuracy), DecisionTreeClassifier (~0.54 balanced accuracy) and ExtraTreeClassifier (~0.54 balanced accuracy) but they're still not great results.
+    - Since LazyPredict only uses default parameters (not optimized), we select tree based models (RandomForestClassifier, ExtraTreesClassifier. RandomForest is an ensemble of DecisionTrees) for further development. These models are naturally robust to heavy tailed distributions and outliers.
+    - NearestCentroid was the best but it's too simple, not tunable and does not scale well. So we can keep it as a simple baseline but it won't be our final model.
 
-    Since LazyPredict only uses default parameters (not optimized), we select tree based models (RandomForestClassifier, ExtraTreesClassifier. RandomForest is an ensemble of DecisionTrees) for further development. These models are naturally robust to heavy tailed distributions and outliers.
-
-    NearestCentroid was the best but it's too simple, not tunable and does not scale well. So we can keep it as a simple baseline but it won't be our final model.
+    For ML1, a false negative (missed subscriber) is more costly than a false positive (wasted call). Therefore, we prioritize recall on class 1 ("yes") instead of accuracy and try to answer: what proportion of actual subscribers did we identify?
     """)
     return
 
@@ -797,12 +799,18 @@ def _(mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    To fix the imbalance, we can try a couple of resampling strategies:
+    To improve recall on the minority class, we can try a couple of strategies:
+
+    Resampling:
 
     - Random Undersampling. This downsamples the majority class to match the minority. We test multiple ratios (1:1, 2:1, 3:1).
     - Changing the class weight for models that support it (`class_weight='balanced'`)
     - SMOTETomek. This combines over and undersampling using SMOTE (oversample) and Tomek links (cleans the decision boundary).
     - SMOTEENN. Also combines both over and undersampling. Uses SMOTE and Edited Nearest Neighbours (ENN) (more aggressive cleaning).
+
+    Threshold tuning:
+
+    - This changes the decision boundary at inference. Instead of the default 0.5 cutoff, we find and use the optimal recall-precision tradeoff.
 
     We avoid using SMOTE by itself because it generates synthetic minority class samples, which can produce unrealistic samples if the minority class is not well-clustered.
     """)
@@ -818,65 +826,376 @@ def _(mo):
 
 
 @app.cell
+def _(
+    RandomForestClassifier,
+    RandomUnderSampler,
+    X_test,
+    X_train,
+    confusion_matrix,
+    y_test,
+    y_train,
+):
+    undersampled_data = RandomUnderSampler(random_state=42).fit_resample(X_train, y_train)
+    rf_undersampled = RandomForestClassifier(random_state=42)
+    rf_undersampled.fit(*undersampled_data)
+    y_pred_rf = rf_undersampled.predict(X_test)
+
+    cm_rf_undersampled = confusion_matrix(y_test, y_pred_rf)
+    cm_rf_undersampled_normalized = cm_rf_undersampled.astype(
+        "float"
+    ) / cm_rf_undersampled.sum(axis=1, keepdims=True)
+    return cm_rf_undersampled_normalized, rf_undersampled
+
+
+@app.cell
+def _(
+    RandomForestClassifier,
+    X_test,
+    X_train,
+    confusion_matrix,
+    y_test,
+    y_train,
+):
+    rf_balanced = RandomForestClassifier(class_weight="balanced", random_state=42)
+    rf_balanced.fit(X_train, y_train)
+    y_pred_rf_balanced = rf_balanced.predict(X_test)
+
+    cm_rf_balanced = confusion_matrix(y_test, y_pred_rf_balanced)
+    cm_rf_balanced_normalized = cm_rf_balanced.astype("float") / cm_rf_balanced.sum(
+        axis=1, keepdims=True
+    )
+    return (cm_rf_balanced_normalized,)
+
+
+@app.cell
+def _(
+    RandomForestClassifier,
+    SMOTETomek,
+    X_test,
+    X_train,
+    confusion_matrix,
+    y_test,
+    y_train,
+):
+    smote_tomek = SMOTETomek(random_state=42)
+    X_resampled_smote_tomek, y_resampled_smote_tomek = smote_tomek.fit_resample(
+        X_train, y_train
+    )
+    rf_smote_tomek = RandomForestClassifier(random_state=42)
+    rf_smote_tomek.fit(X_resampled_smote_tomek, y_resampled_smote_tomek)
+
+    y_pred_rf_smote_tomek = rf_smote_tomek.predict(X_test)
+
+    cm_rf_smote_tomek = confusion_matrix(y_test, y_pred_rf_smote_tomek)
+    cm_rf_smote_tomek_normalized = cm_rf_smote_tomek.astype(
+        "float"
+    ) / cm_rf_smote_tomek.sum(axis=1, keepdims=True)
+    return (cm_rf_smote_tomek_normalized,)
+
+
+@app.cell
+def _(
+    RandomForestClassifier,
+    SMOTEENN,
+    X_test,
+    X_train,
+    confusion_matrix,
+    y_test,
+    y_train,
+):
+    smote_enn = SMOTEENN(random_state=42)
+    X_resampled_smote_enn, y_resampled_smote_enn = smote_enn.fit_resample(X_train, y_train)
+    rf_smote_enn = RandomForestClassifier(random_state=42)
+    rf_smote_enn.fit(X_resampled_smote_enn, y_resampled_smote_enn)
+
+    y_pred_rf_smote_enn = rf_smote_enn.predict(X_test)
+
+    cm_rf_smote_enn = confusion_matrix(y_test, y_pred_rf_smote_enn)
+    cm_rf_smote_enn_normalized = cm_rf_smote_enn.astype("float") / cm_rf_smote_enn.sum(
+        axis=1, keepdims=True
+    )
+    return (cm_rf_smote_enn_normalized,)
+
+
+@app.cell
 def _(mo):
     mo.md(r"""
-    As we saw above, using accuracy is not great due to the large imbalance. So in addition to the resampling strategies, we should also focus on maximizing recall for class 0. Note that ML2 might use a different metric.
+    ##### Confusion Matrices
     """)
     return
 
 
 @app.cell
-def _(RandomUnderSampler, X_train, y_train):
-    resampled_data = RandomUnderSampler(random_state=42).fit_resample(X_train, y_train)
-    return (resampled_data,)
+def _(
+    cm_rf_balanced_normalized,
+    cm_rf_smote_enn_normalized,
+    cm_rf_smote_tomek_normalized,
+    cm_rf_undersampled_normalized,
+    go,
+    make_subplots,
+    mo,
+):
+    labels = ["No Subscription", "Subscription"]
 
-
-@app.cell
-def _(RandomForestClassifier, resampled_data):
-    random_forest = RandomForestClassifier(random_state=42)
-    random_forest.fit(*resampled_data)
-    return (random_forest,)
-
-
-@app.cell
-def _(X_test, confusion_matrix, random_forest, y_test):
-    y_pred = random_forest.predict(X_test)
-    cm = confusion_matrix(y_test, y_pred)
-    cm_normalized = cm.astype("float") / cm.sum(axis=1, keepdims=True)
-    return (cm_normalized,)
-
-
-@app.cell
-def _(cm_normalized, mo, px):
-    fig_confusion_matrix = px.imshow(
-        cm_normalized,
-        x=["No Subscription", "Subscription"],
-        y=["No Subscription", "Subscription"],
-        color_continuous_scale="Blues",
-        text_auto=True,
-        labels=dict(x="Predicted", y="Actual"),
+    fig_rf_resampled = make_subplots(
+        rows=2,
+        cols=2,
+        subplot_titles=[
+            "Undersampling",
+            "Balanced Weights",
+            "SMOTE-Tomek",
+            "SMOTE-ENN",
+        ],
     )
 
-    fig_confusion_matrix.update_layout(
+    for i_resampled, cm_norm_resampled in enumerate(
+        [
+            cm_rf_undersampled_normalized,
+            cm_rf_balanced_normalized,
+            cm_rf_smote_tomek_normalized,
+            cm_rf_smote_enn_normalized,
+        ]
+    ):
+        row_resampled = i_resampled // 2 + 1
+        col_resampled = i_resampled % 2 + 1
+        fig_rf_resampled.add_trace(
+            go.Heatmap(
+                z=cm_norm_resampled,
+                x=labels,
+                y=labels,
+                text=cm_norm_resampled.round(2),
+                texttemplate="%{text:.2%}",
+                colorscale="Blues",
+                zmin=0,
+                zmax=1,
+                showscale=(i_resampled == 0),
+            ),
+            row=row_resampled,
+            col=col_resampled,
+        )
+
+    fig_rf_resampled.update_xaxes(title_text="Predicted")
+    fig_rf_resampled.update_yaxes(title_text="True", row=1, col=1)
+    fig_rf_resampled.update_yaxes(title_text="True", row=2, col=1)
+    fig_rf_resampled.update_yaxes(autorange="reversed")
+
+    fig_rf_resampled.update_layout(
+        height=1000,
+        width=1200,
+        title_text="Confusion Matrices for Different Resampling Techniques (Random Forest)",
+    )
+
+    mo.ui.plotly(fig_rf_resampled)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    We see that 1:1 undersampling is the only strategy that meaningfully identifies subscribers (~56% recall). All other strategies are basically predicting 'no' for most observations.
+
+    However 56% recall with 43% false positive rate is still not great. It's almost the same as random chance (50%).
+
+    <br>
+
+    **Note**:
+
+    - 2:1 undersampling and 3:1 undersampling was tested and removed due to having similar results as balanced weights, SMOTE-Tomek and SMOTE-ENN. This is because there are more 'no' samples in training, which moves the model to predict more 'no's.
+
+    - Combining undersampling and class weights gives identical results as undersampling alone (this was removed because it offered no improvements)
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    #### Threshold Tuning: Precision-Recall Curves
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    The undersampled Random Forest has a default threshold of 0.5: "predict yes if P(yes) > 0.5". Would lowering the threshold to a certain point help?
+
+    Let's try threshold tuning to find out.
+    """)
+    return
+
+
+@app.cell
+def _(X_test, precision_recall_curve, rf_undersampled, y_test):
+    y_prob_rf = rf_undersampled.predict_proba(X_test)[:, 1]
+    precisions_rf, recalls_rf, thresholds_rf = precision_recall_curve(y_test, y_prob_rf)
+    return precisions_rf, recalls_rf, thresholds_rf
+
+
+@app.cell
+def _(go, mo, precisions_rf, recalls_rf, thresholds_rf):
+    fig_precision_recall = go.Figure(
+        data=[
+            go.Scatter(
+                x=thresholds_rf, y=precisions_rf[:-1], mode="lines", name="Precision"
+            ),
+            go.Scatter(x=thresholds_rf, y=recalls_rf[:-1], mode="lines", name="Recall"),
+        ]
+    )
+
+    fig_precision_recall.update_layout(
         height=800,
-        width=800,
-        title_text="Normalized Confusion Matrix for Random Forest Classifier - Recall",
+        width=1000,
+        title_text="Precision and Recall vs. Classification Threshold for Random Forest Classifier (Undersampled)",
+        xaxis_title="Threshold",
+        yaxis_title="Score",
     )
 
-    mo.ui.plotly(fig_confusion_matrix)
+    mo.ui.plotly(fig_precision_recall)
     return
 
 
 @app.cell
 def _(mo):
     mo.md(r"""
-    - True Negatives: ~0.57
-    - True Positives: ~0.58
-    - False Positives: ~0.43
-    - False Negatives: ~0.44
+    Precision is extremely low across all thresholds while recall drops steadily.
 
-    Even after resampling, we see that the results are still almost a coin flip (50/50).
+    - At threshold ~0.2, recall is ~92% but precision is ~7% meaning we'd get ~93% false positive rates (incorrectly flag these 93% non subscribers as potential subscribers)
+    - At threshold ~0.5, recall is ~53% but precision is ~9%, meaning we'd get ~91% false positive rates.
+    - At threshold ~0.82, the curves intersect but both recall and precision are ~15%, which makes it unusable.
     """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    Given the weak individual correlations (<0.06 Spearman), LazyPredict results showing ~25 models at 50/50 (chance) level and the precision-recall curves showing unusable thresholds with both acceptable recall and precision, we conclude that the primary bottleneck is feature signal rather than model or resampling choice.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    #### Feature Engineering
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    To improve the signals, we can try feature engineering and use LazyPredict again to compare models. Then we optimize the best model with hyperparameter tuning.
+
+    From our EDA earlier, we know that these features had the highest subscription rates:
+
+    - Students and retirees
+    - No housing and no loans
+    - Tertiary education
+
+    Based on this, we can try creating these features:
+
+    - age_group (young: < 25, adult: 25-55, senior: 55+)
+    - job type (binary flag): `is_student_or_retired`
+    - `no_debt`: no housing nor loans
+    - High balance: balance > median
+    - Education + job: Tertiary and student/management
+
+    <br>
+
+    **Note**: As mentioned earlier, `default` will be dropped since it has no variance.
+    """)
+    return
+
+
+@app.cell
+def _(df_collected, pl):
+    df_fe = df_collected.with_columns(
+        pl.when(pl.col("age") < 25)
+        .then(pl.lit("young"))
+        .when(pl.col("age") <= 55)
+        .then(pl.lit("adult"))
+        .otherwise(pl.lit("senior"))
+        .alias("age_group"),
+        (pl.col("job").is_in(["student", "retired"])).alias("is_student_or_retired"),
+        ((pl.col("housing") == "no") & (pl.col("loan") == "no")).alias("no_debt"),
+        (pl.col("balance") > pl.col("balance").median()).alias("high_balance"),
+        (
+            (pl.col("education") == "tertiary")
+            & (pl.col("job").is_in(["student", "management"]))
+        ).alias("is_tertiary_and_student_or_management"),
+    )
+    return (df_fe,)
+
+
+@app.cell
+def _(df_fe, pd, pl, train_test_split):
+    ml1_fe_features = [
+        "age",
+        "job",
+        "marital",
+        "education",
+        "balance",
+        "housing",
+        "loan",
+        "age_group",
+        "is_student_or_retired",
+        "no_debt",
+        "high_balance",
+        "is_tertiary_and_student_or_management",
+    ]
+
+    X_fe = df_fe.select(ml1_fe_features).to_pandas()
+    y_fe = (df_fe["y"] == "yes").cast(pl.Int8).to_pandas()
+
+    X_fe = pd.get_dummies(
+        X_fe, drop_first=True
+    )  # avoids dummy variable trap by dropping the first category of each categorical variable. This prevents perfect multicollinearity in linear models, which can cause issues with model estimation and interpretation.
+
+    X_fe_train, X_fe_test, y_fe_train, y_fe_test = train_test_split(
+        X_fe, y_fe, test_size=0.2, random_state=42, stratify=y_fe
+    )  # stratify=y ensures that the train and test sets have the same proportion of positive and negative examples as the original dataset, which is important for imbalanced classification problems.
+
+    # X_fe_train, X_fe_test, y_fe_train, y_fe_test
+    return X_fe_test, X_fe_train, y_fe_test, y_fe_train
+
+
+@app.cell
+def _(mo):
+    run_model_fe_fit_button = mo.ui.run_button(
+        label="Run Model Fit"
+    )  # The model fitting process can be time-consuming, so we add a button to allow users to choose when to run it.
+
+    run_model_fe_fit_button
+    return (run_model_fe_fit_button,)
+
+
+@app.cell
+def _(
+    LazyClassifier,
+    X_fe_test,
+    X_fe_train,
+    mo,
+    run_model_fe_fit_button,
+    y_fe_test,
+    y_fe_train,
+):
+    mo.stop(
+        not run_model_fe_fit_button.value,
+        "Click the button above to run the model fitting process for lazypredict.",
+    )
+
+    fe_top_classifiers = LazyClassifier(verbose=0, ignore_warnings=True)
+    fe_models, fe_predictions = fe_top_classifiers.fit(
+        X_fe_train, X_fe_test, y_fe_train, y_fe_test
+    )
+    return (fe_models,)
+
+
+@app.cell
+def _(fe_models):
+    fe_models
     return
 
 
