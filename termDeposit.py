@@ -19,6 +19,7 @@ def _():
     from sklearn.metrics import confusion_matrix
     from sklearn.metrics import precision_recall_curve
     from imblearn.combine import SMOTETomek, SMOTEENN
+    from xgboost import XGBClassifier
 
     return (
         LazyClassifier,
@@ -26,6 +27,7 @@ def _():
         RandomUnderSampler,
         SMOTEENN,
         SMOTETomek,
+        XGBClassifier,
         confusion_matrix,
         go,
         make_subplots,
@@ -844,7 +846,12 @@ def _(
     cm_rf_undersampled_normalized = cm_rf_undersampled.astype(
         "float"
     ) / cm_rf_undersampled.sum(axis=1, keepdims=True)
-    return cm_rf_undersampled_normalized, rf_undersampled
+    return (
+        cm_rf_undersampled,
+        cm_rf_undersampled_normalized,
+        rf_undersampled,
+        undersampled_data,
+    )
 
 
 @app.cell
@@ -864,7 +871,7 @@ def _(
     cm_rf_balanced_normalized = cm_rf_balanced.astype("float") / cm_rf_balanced.sum(
         axis=1, keepdims=True
     )
-    return (cm_rf_balanced_normalized,)
+    return cm_rf_balanced, cm_rf_balanced_normalized
 
 
 @app.cell
@@ -890,7 +897,7 @@ def _(
     cm_rf_smote_tomek_normalized = cm_rf_smote_tomek.astype(
         "float"
     ) / cm_rf_smote_tomek.sum(axis=1, keepdims=True)
-    return (cm_rf_smote_tomek_normalized,)
+    return cm_rf_smote_tomek, cm_rf_smote_tomek_normalized
 
 
 @app.cell
@@ -914,7 +921,7 @@ def _(
     cm_rf_smote_enn_normalized = cm_rf_smote_enn.astype("float") / cm_rf_smote_enn.sum(
         axis=1, keepdims=True
     )
-    return (cm_rf_smote_enn_normalized,)
+    return cm_rf_smote_enn, cm_rf_smote_enn_normalized
 
 
 @app.cell
@@ -927,16 +934,77 @@ def _(mo):
 
 @app.cell
 def _(
-    cm_rf_balanced_normalized,
-    cm_rf_smote_enn_normalized,
-    cm_rf_smote_tomek_normalized,
-    cm_rf_undersampled_normalized,
+    cm_rf_balanced,
+    cm_rf_smote_enn,
+    cm_rf_smote_tomek,
+    cm_rf_undersampled,
     go,
     make_subplots,
     mo,
 ):
     labels = ["No Subscription", "Subscription"]
 
+    fig_rf_resampled_total = make_subplots(
+        rows=2,
+        cols=2,
+        subplot_titles=[
+            "Undersampling",
+            "Balanced Weights",
+            "SMOTE-Tomek",
+            "SMOTE-ENN",
+        ],
+    )
+
+    for i_resampled_total, cm_norm_resampled_total in enumerate(
+        [
+            cm_rf_undersampled,
+            cm_rf_balanced,
+            cm_rf_smote_tomek,
+            cm_rf_smote_enn,
+        ]
+    ):
+        row_resampled_total = i_resampled_total // 2 + 1
+        col_resampled_total = i_resampled_total % 2 + 1
+        fig_rf_resampled_total.add_trace(
+            go.Heatmap(
+                z=cm_norm_resampled_total,
+                x=labels,
+                y=labels,
+                text=cm_norm_resampled_total,
+                texttemplate="%{text:,d}",
+                colorscale="Blues",
+                showscale=(i_resampled_total == 0),
+            ),
+            row=row_resampled_total,
+            col=col_resampled_total,
+        )
+
+    fig_rf_resampled_total.update_xaxes(title_text="Predicted")
+    fig_rf_resampled_total.update_yaxes(title_text="True", row=1, col=1)
+    fig_rf_resampled_total.update_yaxes(title_text="True", row=2, col=1)
+    fig_rf_resampled_total.update_yaxes(autorange="reversed")
+
+    fig_rf_resampled_total.update_layout(
+        height=1000,
+        width=1200,
+        title_text="Confusion Matrices for Resampling Techniques (Random Forest) - Raw",
+    )
+
+    mo.ui.plotly(fig_rf_resampled_total)
+    return (labels,)
+
+
+@app.cell
+def _(
+    cm_rf_balanced_normalized,
+    cm_rf_smote_enn_normalized,
+    cm_rf_smote_tomek_normalized,
+    cm_rf_undersampled_normalized,
+    go,
+    labels,
+    make_subplots,
+    mo,
+):
     fig_rf_resampled = make_subplots(
         rows=2,
         cols=2,
@@ -982,7 +1050,7 @@ def _(
     fig_rf_resampled.update_layout(
         height=1000,
         width=1200,
-        title_text="Confusion Matrices for Different Resampling Techniques (Random Forest)",
+        title_text="Confusion Matrices for Resampling Techniques (Random Forest) - Normalized",
     )
 
     mo.ui.plotly(fig_rf_resampled)
@@ -992,15 +1060,19 @@ def _(
 @app.cell
 def _(mo):
     mo.md(r"""
-    We see that 1:1 undersampling is the only strategy that meaningfully identifies subscribers (~56% recall). All other strategies are basically predicting 'no' for most observations.
+    We see that 1:1 undersampling is the best strategy, identifying ~56% of subscribers. All other strategies are mostly predicting 'no' for most observations.
 
     However 56% recall with 43% false positive rate is still not great. It's almost the same as random chance (50%).
+
+    - Out of 8000 test customers, the model would call 3505 (predicted 'yes': 3182 + 323). Of those 323 are actual subscribers.
+    - 256 subscribers were missed
+    - ~4495 calls saved compared to calling everyone
 
     <br>
 
     **Note**:
 
-    - 2:1 undersampling and 3:1 undersampling was tested and removed due to having similar results as balanced weights, SMOTE-Tomek and SMOTE-ENN. This is because there are more 'no' samples in training, which moves the model to predict more 'no's.
+    - 2:1 and 3:1 undersampling were tested and removed due to having similar results as balanced weights, SMOTE-Tomek and SMOTE-ENN. This is because there are more 'no' samples in training, which moves the model to predict more 'no's.
 
     - Combining undersampling and class weights gives identical results as undersampling alone (this was removed because it offered no improvements)
     """)
@@ -1046,7 +1118,7 @@ def _(go, mo, precisions_rf, recalls_rf, thresholds_rf):
     fig_precision_recall.update_layout(
         height=800,
         width=1000,
-        title_text="Precision and Recall vs. Classification Threshold for Random Forest Classifier (Undersampled)",
+        title_text="Precision and Recall vs. Classification Threshold - Random Forest (Undersampled)",
         xaxis_title="Threshold",
         yaxis_title="Score",
     )
@@ -1058,11 +1130,17 @@ def _(go, mo, precisions_rf, recalls_rf, thresholds_rf):
 @app.cell
 def _(mo):
     mo.md(r"""
-    Precision is extremely low across all thresholds while recall drops steadily.
+    The precision-recall curve shows that:
 
-    - At threshold ~0.2, recall is ~92% but precision is ~7% meaning we'd get ~93% false positive rates (incorrectly flag these 93% non subscribers as potential subscribers)
-    - At threshold ~0.5, recall is ~53% but precision is ~9%, meaning we'd get ~91% false positive rates.
-    - At threshold ~0.82, the curves intersect but both recall and precision are ~15%, which makes it unusable.
+    - At threshold ~0.2, we catch ~92% of subscribers (recall ~92%) but ~93% would be predicted 'yes' are false positives (~%7 precision).
+    - At threshold ~0.5 (default), we catch ~53% with precision ~%9, slightly better precision.
+    - Higher thresholds reduce calls but miss more subscribers.
+
+    Random Forest with undersampling provided us with a baseline.
+
+    We now try XGBoost, which uses gradient boosting (seqential tree building that corrects previous errors) with the `scale_pos_weight` parameter, which allows us to control emphasis on predicting subscribers.
+
+    First we try with undersampling, then with class weight tuning (without undersample) and lastly with both.
     """)
     return
 
@@ -1070,7 +1148,153 @@ def _(mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    Given the weak individual correlations (<0.06 Spearman), LazyPredict results showing ~25 models at 50/50 (chance) level and the precision-recall curves showing unusable thresholds with both acceptable recall and precision, we conclude that the primary bottleneck is feature signal rather than model or resampling choice.
+    #### XGBoost
+    """)
+    return
+
+
+@app.cell
+def _(
+    XGBClassifier,
+    X_test,
+    X_train,
+    confusion_matrix,
+    undersampled_data,
+    y_test,
+    y_train,
+):
+    xgb_configs = [
+        {"name": "Undersampled", "params": {}, "data": undersampled_data},
+        {
+            "name": "Class Weighted (autoscaled)",
+            "params": {
+                "scale_pos_weight": len(y_train[y_train == 0]) / len(y_train[y_train == 1])
+            },
+            "data": (X_train, y_train),
+        },
+        {
+            "name": "Undersampled + Weight 2",
+            "params": {"scale_pos_weight": 2},
+            "data": undersampled_data,
+        },
+        {
+            "name": "Undersampled + Weight 5",
+            "params": {"scale_pos_weight": 5},
+            "data": undersampled_data,
+        },
+        {
+            "name": "Undersampled + Weight 10",
+            "params": {"scale_pos_weight": 10},
+            "data": undersampled_data,
+        },
+    ]
+
+    xgb_results = {}
+    for config in xgb_configs:
+        xgb_model = XGBClassifier(random_state=42, **config["params"])
+        xgb_model.fit(*config["data"])
+        y_pred_xgb = xgb_model.predict(X_test)
+        xgb_cm = confusion_matrix(y_test, y_pred_xgb)
+        xgb_cm_norm = xgb_cm.astype("float") / xgb_cm.sum(axis=1, keepdims=True)
+        xgb_results[config["name"]] = {
+            "model": xgb_model,
+            "cm": xgb_cm,
+            "cm_norm": xgb_cm_norm,
+        }
+
+    return (xgb_results,)
+
+
+@app.cell
+def _(go, labels, make_subplots, mo, xgb_results):
+    titles_xgb_total = list(xgb_results.keys())
+    fig_xgb_cm_total = make_subplots(rows=2, cols=3, subplot_titles=titles_xgb_total)
+
+    for i_xgb_total, (name_xgb_total, result_xgb_total) in enumerate(xgb_results.items()):
+        row_xgb_total = i_xgb_total // 3 + 1
+        col_xgb_total = i_xgb_total % 3 + 1
+        fig_xgb_cm_total.add_trace(
+            go.Heatmap(
+                z=result_xgb_total["cm"],
+                x=labels,
+                y=labels,
+                text=result_xgb_total["cm"],
+                texttemplate="%{text:,d}",
+                colorscale="Blues",
+                showscale=(i_xgb_total == 0),
+            ),
+            row=row_xgb_total,
+            col=col_xgb_total,
+        )
+
+    fig_xgb_cm_total.update_xaxes(title_text="Predicted")
+    fig_xgb_cm_total.update_yaxes(title_text="True", row=1, col=1)
+    fig_xgb_cm_total.update_yaxes(title_text="True", row=2, col=1)
+    fig_xgb_cm_total.update_yaxes(autorange="reversed")
+
+    fig_xgb_cm_total.update_layout(
+        height=1000,
+        width=1200,
+        title_text="Confusion Matrices for Resampling Techniques (XGBoost) - Raw",
+    )
+
+    mo.ui.plotly(fig_xgb_cm_total)
+    return
+
+
+@app.cell
+def _(go, labels, make_subplots, mo, xgb_results):
+    titles_xgb = list(xgb_results.keys())
+    fig_xgb_cm = make_subplots(rows=2, cols=3, subplot_titles=titles_xgb)
+
+    for i_xgb, (name_xgb, result_xgb) in enumerate(xgb_results.items()):
+        row_xgb = i_xgb // 3 + 1
+        col_xgb = i_xgb % 3 + 1
+        fig_xgb_cm.add_trace(
+            go.Heatmap(
+                z=result_xgb["cm_norm"],
+                x=labels,
+                y=labels,
+                text=result_xgb["cm_norm"].round(2),
+                texttemplate="%{text:.2%}",
+                colorscale="Blues",
+                zmin=0,
+                zmax=1,
+                showscale=(i_xgb == 0),
+            ),
+            row=row_xgb,
+            col=col_xgb,
+        )
+
+    fig_xgb_cm.update_xaxes(title_text="Predicted")
+    fig_xgb_cm.update_yaxes(title_text="True", row=1, col=1)
+    fig_xgb_cm.update_yaxes(title_text="True", row=2, col=1)
+    fig_xgb_cm.update_yaxes(autorange="reversed")
+
+    fig_xgb_cm.update_layout(
+        height=1000,
+        width=1200,
+        title_text="Confusion Matrices for Resampling Techniques (XGBoost) - Normalized",
+    )
+
+    mo.ui.plotly(fig_xgb_cm)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    A big improvement!
+
+    - As we increase class weight, we capture more subscribers (recall) but at the cost of calling more non-subscribers (false positive rates).
+    - With class weight = 2, we have ~77% recall, with a false positive rate of ~67%, which is manageable. We'd catch most subscribers while cutting the call list by ~1/3.
+    - Class weight = 5, we have ~88% recall, with a false positive rate of ~84%.
+    - Class weight = 10, we have ~93% recall, with a false positive rate of ~89%.
+    - Class weight = autoscaled, performed worst than our baseline.
+
+    Class weight = 2 might be the sweet spot for us.
+
+    Let's validate these results with cross validation and check if the 77% recall is actually stable or just lucky.
     """)
     return
 
@@ -1200,7 +1424,18 @@ def _(fe_models):
 
 
 @app.cell
-def _():
+def _(mo):
+    mo.md(r"""
+    The results are the same as before. We see that the engineered features are redundant.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+ 
+    """)
     return
 
 
