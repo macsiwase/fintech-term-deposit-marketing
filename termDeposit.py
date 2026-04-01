@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.20.4"
+__generated_with = "0.22.0"
 app = marimo.App()
 
 
@@ -8,27 +8,30 @@ app = marimo.App()
 def _():
     import marimo as mo
     import polars as pl
+    import pandas as pd
     import plotly.express as px
     import plotly.graph_objects as go
-    import pandas as pd
     from plotly.subplots import make_subplots
     from lazypredict.Supervised import LazyClassifier
-    from sklearn.model_selection import train_test_split
-    from imblearn.under_sampling import RandomUnderSampler
+    from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
     from sklearn.ensemble import RandomForestClassifier
-    from sklearn.metrics import confusion_matrix
-    from sklearn.metrics import precision_recall_curve
+    from sklearn.metrics import confusion_matrix, precision_recall_curve
+    from imblearn.under_sampling import RandomUnderSampler
     from imblearn.combine import SMOTETomek, SMOTEENN
+    from imblearn.pipeline import Pipeline as ImbPipeline
     from xgboost import XGBClassifier
 
     return (
+        ImbPipeline,
         LazyClassifier,
         RandomForestClassifier,
         RandomUnderSampler,
         SMOTEENN,
         SMOTETomek,
+        StratifiedKFold,
         XGBClassifier,
         confusion_matrix,
+        cross_val_score,
         go,
         make_subplots,
         mo,
@@ -699,8 +702,8 @@ def _(mo):
 
     We propose a multi layered ML system:
 
-    1. ML1 (Pre call filter): Use features known before a call (age, job, marital, education, balance, housing, loan) with the goal of reducing the 40,000 customers to a targeted subset. This model will predict which customers are likely to subscribe (before the call happens).
-    2. ML2 (Optimizer): Use features known after a call (contact, campaign, month, duration) with the goal of prioritizing high probability contacts.
+    1. ML1 (Pre call filter): Use features known before a call (age, job, marital, education, balance, housing, loan) with the goal of reducing the 40,000 customers to a targeted subset.
+    2. ML2 (Optimizer): Use features known after a call (contact, campaign, month, duration) and prioritize customers to keep calling. That is, which customers are more likely to say yes to subscribing and keep calling these type of customers.
     """)
     return
 
@@ -737,7 +740,7 @@ def _(df_collected, pd, pl, train_test_split):
     )  # stratify=y ensures that the train and test sets have the same proportion of positive and negative examples as the original dataset, which is important for imbalanced classification problems.
 
     # X_train, X_test, y_train, y_test
-    return X_test, X_train, y_test, y_train
+    return X, X_test, X_train, y, y_test, y_train
 
 
 @app.cell
@@ -1201,7 +1204,6 @@ def _(
             "cm": xgb_cm,
             "cm_norm": xgb_cm_norm,
         }
-
     return (xgb_results,)
 
 
@@ -1300,62 +1302,74 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
-    #### Feature Engineering
-    """)
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    To improve the signals, we can try feature engineering and use LazyPredict again to compare models. Then we optimize the best model with hyperparameter tuning.
-
-    From our EDA earlier, we know that these features had the highest subscription rates:
-
-    - Students and retirees
-    - No housing and no loans
-    - Tertiary education
-
-    Based on this, we can try creating these features:
-
-    - age_group (young: < 25, adult: 25-55, senior: 55+)
-    - job type (binary flag): `is_student_or_retired`
-    - `no_debt`: no housing nor loans
-    - High balance: balance > median
-    - Education + job: Tertiary and student/management
-
-    <br>
-
-    **Note**: As mentioned earlier, `default` will be dropped since it has no variance.
-    """)
-    return
-
-
-@app.cell
-def _(df_collected, pl):
-    df_fe = df_collected.with_columns(
-        pl.when(pl.col("age") < 25)
-        .then(pl.lit("young"))
-        .when(pl.col("age") <= 55)
-        .then(pl.lit("adult"))
-        .otherwise(pl.lit("senior"))
-        .alias("age_group"),
-        (pl.col("job").is_in(["student", "retired"])).alias("is_student_or_retired"),
-        ((pl.col("housing") == "no") & (pl.col("loan") == "no")).alias("no_debt"),
-        (pl.col("balance") > pl.col("balance").median()).alias("high_balance"),
-        (
-            (pl.col("education") == "tertiary")
-            & (pl.col("job").is_in(["student", "management"]))
-        ).alias("is_tertiary_and_student_or_management"),
+def _(
+    ImbPipeline,
+    RandomUnderSampler,
+    StratifiedKFold,
+    X,
+    XGBClassifier,
+    cross_val_score,
+    mo,
+    y,
+):
+    xgb_cv_pipeline = ImbPipeline(  # Use imbpipeline to ensure that the undersampling is done within each fold of the cross-validation, preventing data leakage.
+        [
+            ("undersampler", RandomUnderSampler(random_state=42)),
+            ("classifier", XGBClassifier(random_state=42, scale_pos_weight=2)),
+        ]
     )
-    return (df_fe,)
+
+    xgb_cv_folds = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+    xgb_recall_scores_cv = cross_val_score(
+        xgb_cv_pipeline, X, y, cv=xgb_cv_folds, scoring="recall"
+    )
+
+    mo.md(f"""
+    **5 Fold Cross Validation Scores (XGBoost Undersampled + Weight 2)**
+
+    - Recall per fold: {[f"{s:.2%}" for s in xgb_recall_scores_cv]}
+    - Mean recall: {xgb_recall_scores_cv.mean():.2%}
+    - Std: {xgb_recall_scores_cv.std():.2%}
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The results are verified and we get ~76% recall consistently. So ML1 can now identify ~3 out of 4 potential subscribers before we make any calls.
+
+    Applied to the full 40,000 customers, this means that
+
+    - ~2235 out of ~2895 actual subscribers would be correctly flagged for calling
+    - The call list would be reduced from 40,000 to 27,195
+    - ~660 subscribers would be missed
+
+    Now that we have a reduced list of customers to call, we develop ML2, which will help us identify which customers are more likely to say yes and to keep calling.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## ML2: Optimizer
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ML2 uses all features including post call data because calls are actively happening. ML2 helps agents decide if this customer is worth another call or not due to how likely they are to subscribe.
+    """)
+    return
 
 
 @app.cell
-def _(df_fe, pd, pl, train_test_split):
-    ml1_fe_features = [
+def _(RandomUnderSampler, df_collected, pd, train_test_split, y):
+    ml2_features = [
         "age",
         "job",
         "marital",
@@ -1363,78 +1377,225 @@ def _(df_fe, pd, pl, train_test_split):
         "balance",
         "housing",
         "loan",
-        "age_group",
-        "is_student_or_retired",
-        "no_debt",
-        "high_balance",
-        "is_tertiary_and_student_or_management",
+        "contact",
+        "day",
+        "month",
+        "duration",
+        "campaign",
     ]
 
-    X_fe = df_fe.select(ml1_fe_features).to_pandas()
-    y_fe = (df_fe["y"] == "yes").cast(pl.Int8).to_pandas()
 
-    X_fe = pd.get_dummies(
-        X_fe, drop_first=True
-    )  # avoids dummy variable trap by dropping the first category of each categorical variable. This prevents perfect multicollinearity in linear models, which can cause issues with model estimation and interpretation.
+    X_ml2 = df_collected.select(ml2_features).to_pandas()
 
-    X_fe_train, X_fe_test, y_fe_train, y_fe_test = train_test_split(
-        X_fe, y_fe, test_size=0.2, random_state=42, stratify=y_fe
-    )  # stratify=y ensures that the train and test sets have the same proportion of positive and negative examples as the original dataset, which is important for imbalanced classification problems.
+    X_ml2 = pd.get_dummies(X_ml2, drop_first=True)
 
-    # X_fe_train, X_fe_test, y_fe_train, y_fe_test
-    return X_fe_test, X_fe_train, y_fe_test, y_fe_train
+    X_train_ml2, X_test_ml2, y_train_ml2, y_test_ml2 = train_test_split(
+        X_ml2, y, test_size=0.2, random_state=42, stratify=y
+    )
 
-
-@app.cell
-def _(mo):
-    run_model_fe_fit_button = mo.ui.run_button(
-        label="Run Model Fit"
-    )  # The model fitting process can be time-consuming, so we add a button to allow users to choose when to run it.
-
-    run_model_fe_fit_button
-    return (run_model_fe_fit_button,)
+    undersampled_data_ml2 = RandomUnderSampler(random_state=42).fit_resample(
+        X_train_ml2, y_train_ml2
+    )
+    return (
+        X_ml2,
+        X_test_ml2,
+        X_train_ml2,
+        undersampled_data_ml2,
+        y_test_ml2,
+        y_train_ml2,
+    )
 
 
 @app.cell
 def _(
-    LazyClassifier,
-    X_fe_test,
-    X_fe_train,
-    mo,
-    run_model_fe_fit_button,
-    y_fe_test,
-    y_fe_train,
+    XGBClassifier,
+    X_test_ml2,
+    X_train_ml2,
+    confusion_matrix,
+    undersampled_data_ml2,
+    y_test_ml2,
+    y_train_ml2,
 ):
-    mo.stop(
-        not run_model_fe_fit_button.value,
-        "Click the button above to run the model fitting process for lazypredict.",
-    )
+    xgb_configs_ml2 = [
+        {"name": "Undersampled", "params": {}, "data": undersampled_data_ml2},
+        {
+            "name": "Class Weighted (autoscaled)",
+            "params": {
+                "scale_pos_weight": len(y_train_ml2[y_train_ml2 == 0])
+                / len(y_train_ml2[y_train_ml2 == 1])
+            },
+            "data": (X_train_ml2, y_train_ml2),
+        },
+        {
+            "name": "Undersampled + Weight 2",
+            "params": {"scale_pos_weight": 2},
+            "data": undersampled_data_ml2,
+        },
+        {
+            "name": "Undersampled + Weight 5",
+            "params": {"scale_pos_weight": 5},
+            "data": undersampled_data_ml2,
+        },
+        {
+            "name": "Undersampled + Weight 10",
+            "params": {"scale_pos_weight": 10},
+            "data": undersampled_data_ml2,
+        },
+    ]
 
-    fe_top_classifiers = LazyClassifier(verbose=0, ignore_warnings=True)
-    fe_models, fe_predictions = fe_top_classifiers.fit(
-        X_fe_train, X_fe_test, y_fe_train, y_fe_test
-    )
-    return (fe_models,)
+    xgb_results_ml2 = {}
+    for config_ml2 in xgb_configs_ml2:
+        xgb_model_ml2 = XGBClassifier(random_state=42, **config_ml2["params"])
+        xgb_model_ml2.fit(*config_ml2["data"])
+        y_pred_xgb_ml2 = xgb_model_ml2.predict(X_test_ml2)
+        xgb_cm_ml2 = confusion_matrix(y_test_ml2, y_pred_xgb_ml2)
+        xgb_cm_norm_ml2 = xgb_cm_ml2.astype("float") / xgb_cm_ml2.sum(axis=1, keepdims=True)
+        xgb_results_ml2[config_ml2["name"]] = {
+            "model": xgb_model_ml2,
+            "cm": xgb_cm_ml2,
+            "cm_norm": xgb_cm_norm_ml2,
+        }
+    return (xgb_results_ml2,)
 
 
 @app.cell
-def _(fe_models):
-    fe_models
+def _(go, labels, make_subplots, mo, xgb_results_ml2):
+    titles_xgb_total_ml2 = list(xgb_results_ml2.keys())
+    fig_xgb_cm_total_ml2 = make_subplots(
+        rows=2, cols=3, subplot_titles=titles_xgb_total_ml2
+    )
+
+    for i_xgb_total_ml2, (name_xgb_total_ml2, result_xgb_total_ml2) in enumerate(
+        xgb_results_ml2.items()
+    ):
+        row_xgb_total_ml2 = i_xgb_total_ml2 // 3 + 1
+        col_xgb_total_ml2 = i_xgb_total_ml2 % 3 + 1
+        fig_xgb_cm_total_ml2.add_trace(
+            go.Heatmap(
+                z=result_xgb_total_ml2["cm"],
+                x=labels,
+                y=labels,
+                text=result_xgb_total_ml2["cm"],
+                texttemplate="%{text:,d}",
+                colorscale="Blues",
+                showscale=(i_xgb_total_ml2 == 0),
+            ),
+            row=row_xgb_total_ml2,
+            col=col_xgb_total_ml2,
+        )
+
+    fig_xgb_cm_total_ml2.update_xaxes(title_text="Predicted")
+    fig_xgb_cm_total_ml2.update_yaxes(title_text="True", row=1, col=1)
+    fig_xgb_cm_total_ml2.update_yaxes(title_text="True", row=2, col=1)
+    fig_xgb_cm_total_ml2.update_yaxes(autorange="reversed")
+
+    fig_xgb_cm_total_ml2.update_layout(
+        height=1000,
+        width=1200,
+        title_text="Confusion Matrices for ML2 Resampling Techniques (XGBoost) - Raw",
+    )
+
+    mo.ui.plotly(fig_xgb_cm_total_ml2)
     return
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
-    The results are the same as before. We see that the engineered features are redundant.
+def _(go, labels, make_subplots, mo, xgb_results_ml2):
+    titles_xgb_ml2 = list(xgb_results_ml2.keys())
+    fig_xgb_cm_ml2 = make_subplots(rows=2, cols=3, subplot_titles=titles_xgb_ml2)
+
+    for i_xgb_ml2, (name_xgb_ml2, result_xgb_ml2) in enumerate(xgb_results_ml2.items()):
+        row_xgb_ml2 = i_xgb_ml2 // 3 + 1
+        col_xgb_ml2 = i_xgb_ml2 % 3 + 1
+        fig_xgb_cm_ml2.add_trace(
+            go.Heatmap(
+                z=result_xgb_ml2["cm_norm"],
+                x=labels,
+                y=labels,
+                text=result_xgb_ml2["cm_norm"].round(2),
+                texttemplate="%{text:.2%}",
+                colorscale="Blues",
+                zmin=0,
+                zmax=1,
+                showscale=(i_xgb_ml2 == 0),
+            ),
+            row=row_xgb_ml2,
+            col=col_xgb_ml2,
+        )
+
+    fig_xgb_cm_ml2.update_xaxes(title_text="Predicted")
+    fig_xgb_cm_ml2.update_yaxes(title_text="True", row=1, col=1)
+    fig_xgb_cm_ml2.update_yaxes(title_text="True", row=2, col=1)
+    fig_xgb_cm_ml2.update_yaxes(autorange="reversed")
+
+    fig_xgb_cm_ml2.update_layout(
+        height=1000,
+        width=1200,
+        title_text="Confusion Matrices for ML2 Resampling Techniques (XGBoost) - Normalized",
+    )
+
+    mo.ui.plotly(fig_xgb_cm_ml2)
+    return
+
+
+@app.cell
+def _(
+    ImbPipeline,
+    RandomUnderSampler,
+    StratifiedKFold,
+    XGBClassifier,
+    X_ml2,
+    cross_val_score,
+    mo,
+    y,
+):
+    xgb_ml2_cv_undersampled = ImbPipeline(
+        [
+            ("undersampler", RandomUnderSampler(random_state=42)),
+            ("classifier", XGBClassifier(random_state=42)),
+        ]
+    )
+
+    xgb_ml2_cv_weighted_auto = XGBClassifier(
+        random_state=42,
+        scale_pos_weight=len(y[y == 0]) / len(y[y == 1]),
+    )
+
+    xgb_ml2_cv_folds = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+    xgb_ml2_cv_scores_undersampled = cross_val_score(
+        xgb_ml2_cv_undersampled, X_ml2, y, cv=xgb_ml2_cv_folds, scoring="recall"
+    )
+
+    xgb_ml2_recall_scores_weighted_cv_auto = cross_val_score(
+        xgb_ml2_cv_weighted_auto, X_ml2, y, cv=xgb_ml2_cv_folds, scoring="recall"
+    )
+
+    mo.md(f"""
+    5 Fold Cross Validation Scores (ML2)
+
+    XGBoost Undersampled:
+    - Recall per fold: {[f"{s:.2%}" for s in xgb_ml2_cv_scores_undersampled]}
+    - Mean recall: {xgb_ml2_cv_scores_undersampled.mean():.2%}
+    - Std: {xgb_ml2_cv_scores_undersampled.std():.2%}
+
+    XGBoost Class Weighted (autoscaled without undersampling):
+    - Recall per fold: {[f"{s:.2%}" for s in xgb_ml2_recall_scores_weighted_cv_auto]}
+    - Mean recall: {xgb_ml2_recall_scores_weighted_cv_auto.mean():.2%}
+    - Std: {xgb_ml2_recall_scores_weighted_cv_auto.std():.2%}
     """)
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
- 
+    All variants performed well! And we hit a ceiling of 96% recall in the undersampled + weight 5 and 10.
+
+    We also see that
+
+    - Class weight (auto) has the best precision (457/(457+646) ~= 41%) while maintaining ~79% recall. A strong result.
+    - The undersampled version has ~90% recall with a false positive rate of ~14%. A very strong result and is our best choice as verified by cross validation. It also corresponds with ML2's goal of catching more subscribers.
     """)
     return
 
