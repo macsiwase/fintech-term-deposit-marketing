@@ -538,9 +538,9 @@ def _(df_collected, go, make_subplots, mo):
                     col=col_idx_numerical,
                 )
 
-    fig_violin.update_yaxes(title_text="Balance", row=1, col=2, range=[-800, 5000])
-    fig_violin.update_yaxes(title_text="Duration", row=2, col=1, range=[0, 1000])
-    fig_violin.update_yaxes(title_text="Campaign", row=2, col=2, range=[0, 20])
+    fig_violin.update_yaxes(row=1, col=2, range=[-800, 5000])
+    fig_violin.update_yaxes(row=2, col=1, range=[0, 1000])
+    fig_violin.update_yaxes(row=2, col=2, range=[0, 20])
 
     fig_violin.update_layout(
         height=800,
@@ -880,6 +880,7 @@ def _(
     ]
 
     rf_results = {}
+
     for rf_config in rf_configs:
         model = RandomForestClassifier(random_state=42, **rf_config["params"])
         model.fit(*rf_config["data"])
@@ -903,14 +904,7 @@ def _(go, make_subplots, mo, rf_results):
     labels = ["No Subscription", "Subscription"]
 
     fig_rf_resampled_total = make_subplots(
-        rows=2,
-        cols=2,
-        subplot_titles=[
-            "Undersampling",
-            "Balanced Weights",
-            "SMOTE-Tomek",
-            "SMOTE-ENN",
-        ],
+        rows=2, cols=2, subplot_titles=list(rf_results.keys())
     )
 
     for i_resampled_total, (rf_name_total, rf_result_total) in enumerate(
@@ -935,11 +929,13 @@ def _(go, make_subplots, mo, rf_results):
     fig_rf_resampled_total.update_xaxes(title_text="Predicted")
     fig_rf_resampled_total.update_yaxes(title_text="True", row=1, col=1)
     fig_rf_resampled_total.update_yaxes(title_text="True", row=2, col=1)
+    fig_rf_resampled_total.update_yaxes(showticklabels=False, row=1, col=2)
+    fig_rf_resampled_total.update_yaxes(showticklabels=False, row=2, col=2)
     fig_rf_resampled_total.update_yaxes(autorange="reversed")
 
     fig_rf_resampled_total.update_layout(
-        height=1000,
-        width=1200,
+        height=800,
+        width=800,
         title_text="Confusion Matrices for Resampling Techniques (Random Forest) - Raw",
     )
 
@@ -949,16 +945,7 @@ def _(go, make_subplots, mo, rf_results):
 
 @app.cell
 def _(go, labels, make_subplots, mo, rf_results):
-    fig_rf_resampled = make_subplots(
-        rows=2,
-        cols=2,
-        subplot_titles=[
-            "Undersampling",
-            "Balanced Weights",
-            "SMOTE-Tomek",
-            "SMOTE-ENN",
-        ],
-    )
+    fig_rf_resampled = make_subplots(rows=2, cols=2, subplot_titles=list(rf_results.keys()))
 
     for i_resampled, (rf_name, rf_result) in enumerate(rf_results.items()):
         row_resampled = i_resampled // 2 + 1
@@ -982,11 +969,13 @@ def _(go, labels, make_subplots, mo, rf_results):
     fig_rf_resampled.update_xaxes(title_text="Predicted")
     fig_rf_resampled.update_yaxes(title_text="True", row=1, col=1)
     fig_rf_resampled.update_yaxes(title_text="True", row=2, col=1)
+    fig_rf_resampled.update_yaxes(showticklabels=False, row=1, col=2)
+    fig_rf_resampled.update_yaxes(showticklabels=False, row=2, col=2)
     fig_rf_resampled.update_yaxes(autorange="reversed")
 
     fig_rf_resampled.update_layout(
-        height=1000,
-        width=1200,
+        height=800,
+        width=800,
         title_text="Confusion Matrices for Resampling Techniques (Random Forest) - Normalized",
     )
 
@@ -1175,11 +1164,14 @@ def _(go, labels, make_subplots, mo, xgb_results):
     fig_xgb_cm_total.update_xaxes(title_text="Predicted")
     fig_xgb_cm_total.update_yaxes(title_text="True", row=1, col=1)
     fig_xgb_cm_total.update_yaxes(title_text="True", row=2, col=1)
+    fig_xgb_cm_total.update_yaxes(showticklabels=False, row=1, col=2)
+    fig_xgb_cm_total.update_yaxes(showticklabels=False, row=1, col=3)
+    fig_xgb_cm_total.update_yaxes(showticklabels=False, row=2, col=2)
     fig_xgb_cm_total.update_yaxes(autorange="reversed")
 
     fig_xgb_cm_total.update_layout(
-        height=1000,
-        width=1200,
+        height=800,
+        width=1000,
         title_text="Confusion Matrices for Resampling Techniques (XGBoost) - Raw",
     )
 
@@ -1214,11 +1206,14 @@ def _(go, labels, make_subplots, mo, xgb_results):
     fig_xgb_cm.update_xaxes(title_text="Predicted")
     fig_xgb_cm.update_yaxes(title_text="True", row=1, col=1)
     fig_xgb_cm.update_yaxes(title_text="True", row=2, col=1)
+    fig_xgb_cm.update_yaxes(showticklabels=False, row=1, col=2)
+    fig_xgb_cm.update_yaxes(showticklabels=False, row=1, col=3)
+    fig_xgb_cm.update_yaxes(showticklabels=False, row=2, col=2)
     fig_xgb_cm.update_yaxes(autorange="reversed")
 
     fig_xgb_cm.update_layout(
-        height=1000,
-        width=1200,
+        height=800,
+        width=1000,
         title_text="Confusion Matrices for Resampling Techniques (XGBoost) - Normalized",
     )
 
@@ -1492,11 +1487,14 @@ def _(go, labels, make_subplots, mo, xgb_results_ml2):
     fig_xgb_cm_total_ml2.update_xaxes(title_text="Predicted")
     fig_xgb_cm_total_ml2.update_yaxes(title_text="True", row=1, col=1)
     fig_xgb_cm_total_ml2.update_yaxes(title_text="True", row=2, col=1)
+    fig_xgb_cm_total_ml2.update_yaxes(showticklabels=False, row=1, col=2)
+    fig_xgb_cm_total_ml2.update_yaxes(showticklabels=False, row=1, col=3)
+    fig_xgb_cm_total_ml2.update_yaxes(showticklabels=False, row=2, col=2)
     fig_xgb_cm_total_ml2.update_yaxes(autorange="reversed")
 
     fig_xgb_cm_total_ml2.update_layout(
-        height=1000,
-        width=1200,
+        height=800,
+        width=1000,
         title_text="Confusion Matrices for ML2 Resampling Techniques (XGBoost) - Raw",
     )
 
@@ -1531,11 +1529,14 @@ def _(go, labels, make_subplots, mo, xgb_results_ml2):
     fig_xgb_cm_ml2.update_xaxes(title_text="Predicted")
     fig_xgb_cm_ml2.update_yaxes(title_text="True", row=1, col=1)
     fig_xgb_cm_ml2.update_yaxes(title_text="True", row=2, col=1)
+    fig_xgb_cm_ml2.update_yaxes(showticklabels=False, row=1, col=2)
+    fig_xgb_cm_ml2.update_yaxes(showticklabels=False, row=1, col=3)
+    fig_xgb_cm_ml2.update_yaxes(showticklabels=False, row=2, col=2)
     fig_xgb_cm_ml2.update_yaxes(autorange="reversed")
 
     fig_xgb_cm_ml2.update_layout(
-        height=1000,
-        width=1200,
+        height=800,
+        width=1000,
         title_text="Confusion Matrices for ML2 Resampling Techniques (XGBoost) - Normalized",
     )
 
@@ -1767,10 +1768,12 @@ def _(
     fig_xgb_cm_ml2_no_month.update_xaxes(title_text="Predicted")
     fig_xgb_cm_ml2_no_month.update_yaxes(title_text="True")
     fig_xgb_cm_ml2_no_month.update_yaxes(autorange="reversed")
+    fig_xgb_cm_ml2_no_month.update_yaxes(showticklabels=False, row=1, col=2)
+    fig_xgb_cm_ml2_no_month.update_yaxes(showticklabels=False, row=2, col=2)
 
     fig_xgb_cm_ml2_no_month.update_layout(
-        height=1000,
-        width=1000,
+        height=800,
+        width=800,
         title_text="Confusion Matrices for XGBoost with and without Month Features",
     )
 
