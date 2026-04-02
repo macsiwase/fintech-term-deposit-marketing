@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="img/numerical_violin.png" width="400">
+  <img src="img/numerical-violin.png" width="500">
 </p>
 
 # Predicting Term Deposit Subscriptions for a European Bank
@@ -22,25 +22,47 @@ Out of 40,000 customers contacted, only ~2,900 subscribed (~7%). Every unsuccess
 
 ### Two-Layer ML System
 
+Built a two-layer ML system that saves ~13,000 unnecessary sales calls while catching 91% of potential subscribers.
+
+
 | Layer | Purpose | Model | Recall | Accuracy |
 |-------|---------|-------|--------|----------|
 | ML1 (Pre-call filter) | Reduce call list before any calls | XGBoost + undersampling + weight 2 | ~76% | 36% (optimized for recall) |
 | ML2 (Call optimizer) | Prioritize who to keep calling | XGBoost + undersampling | ~91% | ~86% |
 
+ML1 optimizes for recall (catching subscribers) rather than accuracy, since accuracy is misleading with a large class imbalance.
+
 ML2 exceeds the project's 81% accuracy target with 5-fold cross-validation.
 
-### Business Impact (ML1)
+### ML1: Pre-Call Filter
+
+ML1 uses only pre-call features (age, job, education, balance, etc.) to filter the call list before any calls are made.
+
+<p align="center">
+  <img src="img/ml1-confusion-matrices-normalized.png" width="700">
+</p>
 
 - Reduces the call list from 40,000 to ~27,000 (~32% reduction)
 - Catches ~76% of potential subscribers before any calls are made
 - Saves ~13,000 unnecessary calls
 
-### Key Features Driving Subscriptions
+### ML2: Call Optimizer
 
-- **Timing matters most**: March and October had the highest conversion rates
-- Pre-call demographic features (age, job, balance, etc.) contribute roughly equally with no single dominant predictor
+ML2 uses all features including post-call data (duration, campaign, month, contact) to help agents decide which customers to keep calling.
+
+<p align="center">
+  <img src="img/ml2-confusion-matrices-normalized.png" width="700">
+</p>
+
+- Catches ~91% of subscribers with ~86% accuracy
+- Validated with 5-fold CV (std +/-0.97%)
+- As class weight increases, recall improves at the cost of more false positives
 
 ### Segments to Prioritize
+
+<p align="center">
+  <img src="img/categorical-subscription-rates.png" width="700">
+</p>
 
 | Segment | Conversion Rate |
 |---------|----------------|
@@ -52,6 +74,15 @@ ML2 exceeds the project's 81% accuracy target with 5-fold cross-validation.
 
 Management is the highest-volume high-conversion segment.
 
+### Key Features Driving Subscriptions
+
+<p align="center">
+  <img src="img/feature-importance.png" width="600">
+</p>
+
+- **Timing matters most**: March and October had the highest conversion rates and dominated ML2's feature importance
+- Pre-call demographic features contribute roughly equally with no single dominant predictor (explaining ML1's lower performance)
+
 ## My Approach
 
 ### Focus on Recall Over Accuracy
@@ -60,11 +91,11 @@ With 93% of customers not subscribing, a model predicting "no" for everyone achi
 
 ### Methodology
 
-1. **Exploratory Data Analysis**: Univariate distributions, bivariate analysis (subscription rates by segment), correlation analysis (Pearson and Spearman), and scatter matrix to understand feature relationships.
+1. **Exploratory Data Analysis**: Univariate distributions (histograms, skewness, kurtosis), bivariate analysis (subscription rates by segment, violin plots), and correlation analysis (Pearson and Spearman) to understand feature relationships.
 
 2. **ML1 (Pre-call filter)**: Tested Random Forest with multiple resampling strategies (undersampling, SMOTE-Tomek, SMOTE-ENN, class weights). Undersampling was the only effective strategy. Switched to XGBoost with `scale_pos_weight` tuning, achieving ~76% recall.
 
-3. **ML2 (Call optimizer)**: Used all features including post-call data (duration, campaign, month, contact). XGBoost with undersampling achieved ~91% recall, validated with 5-fold CV (std +/-0.97%).
+3. **ML2 (Call optimizer)**: Used all features including post-call data. XGBoost with undersampling achieved ~91% recall, validated with 5-fold CV (std +/-0.97%).
 
 4. **Feature importance analysis**: Identified March and October as dominant predictors in ML2. Verified month features carry real signal by training without them (recall drops from 92% to 85%).
 
