@@ -1766,10 +1766,11 @@ def _(
 
 
     fig_xgb_cm_ml2_no_month.update_xaxes(title_text="Predicted")
-    fig_xgb_cm_ml2_no_month.update_yaxes(title_text="True")
-    fig_xgb_cm_ml2_no_month.update_yaxes(autorange="reversed")
+    fig_xgb_cm_ml2_no_month.update_yaxes(title_text="True", row=1, col=1)
+    fig_xgb_cm_ml2_no_month.update_yaxes(title_text="True", row=2, col=1)
     fig_xgb_cm_ml2_no_month.update_yaxes(showticklabels=False, row=1, col=2)
     fig_xgb_cm_ml2_no_month.update_yaxes(showticklabels=False, row=2, col=2)
+    fig_xgb_cm_ml2_no_month.update_yaxes(autorange="reversed")
 
     fig_xgb_cm_ml2_no_month.update_layout(
         height=800,
