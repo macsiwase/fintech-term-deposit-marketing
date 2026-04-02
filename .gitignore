@@ -34,3 +34,5 @@ temp/
 *.tmp
 
 *.csv
+
+project_details.md
