@@ -862,78 +862,32 @@ def _(
 
     rf_configs = [
         {"name": "Undersampled", "data": undersampled_data, "params": {}},
-        {"name": "Balanced Weights", "data": (X_train, y_train), "params": {"class_weight": "balanced"}},
-        {"name": "SMOTE-Tomek", "data": SMOTETomek(random_state=42).fit_resample(X_train, y_train), "params": {}},
-        {"name": "SMOTE-ENN", "data": SMOTEENN(random_state=42).fit_resample(X_train, y_train), "params": {}},
+        {
+            "name": "Balanced Weights",
+            "data": (X_train, y_train),
+            "params": {"class_weight": "balanced"},
+        },
+        {
+            "name": "SMOTE-Tomek",
+            "data": SMOTETomek(random_state=42).fit_resample(X_train, y_train),
+            "params": {},
+        },
+        {
+            "name": "SMOTE-ENN",
+            "data": SMOTEENN(random_state=42).fit_resample(X_train, y_train),
+            "params": {},
+        },
     ]
 
     rf_results = {}
-    for config in rf_configs:
-        model = RandomForestClassifier(random_state=42, **config["params"])
-        model.fit(*config["data"])
+    for rf_config in rf_configs:
+        model = RandomForestClassifier(random_state=42, **rf_config["params"])
+        model.fit(*rf_config["data"])
         y_pred = model.predict(X_test)
         cm = confusion_matrix(y_test, y_pred)
         cm_norm = cm.astype("float") / cm.sum(axis=1, keepdims=True)
-        rf_results[config["name"]] = {"model": model, "cm": cm, "cm_norm": cm_norm}
-
-    return (undersampled_data,)
-
-
-@app.cell
-def _():
-    # undersampled_data = RandomUnderSampler(random_state=42).fit_resample(X_train, y_train)
-    # rf_undersampled = RandomForestClassifier(random_state=42)
-    # rf_undersampled.fit(*undersampled_data)
-    # y_pred_rf = rf_undersampled.predict(X_test)
-
-
-    # # Undersampled
-    # cm_rf_undersampled = confusion_matrix(y_test, y_pred_rf)
-    # cm_rf_undersampled_normalized = cm_rf_undersampled.astype(
-    #     "float"
-    # ) / cm_rf_undersampled.sum(axis=1, keepdims=True)
-
-
-    # # Balanced weights
-    # rf_balanced = RandomForestClassifier(class_weight="balanced", random_state=42)
-    # rf_balanced.fit(X_train, y_train)
-    # y_pred_rf_balanced = rf_balanced.predict(X_test)
-
-    # cm_rf_balanced = confusion_matrix(y_test, y_pred_rf_balanced)
-    # cm_rf_balanced_normalized = cm_rf_balanced.astype("float") / cm_rf_balanced.sum(
-    #     axis=1, keepdims=True
-    # )
-
-
-    # # SMOTETOMEK
-    # smote_tomek = SMOTETomek(random_state=42)
-    # X_resampled_smote_tomek, y_resampled_smote_tomek = smote_tomek.fit_resample(
-    #     X_train, y_train
-    # )
-    # rf_smote_tomek = RandomForestClassifier(random_state=42)
-    # rf_smote_tomek.fit(X_resampled_smote_tomek, y_resampled_smote_tomek)
-
-    # y_pred_rf_smote_tomek = rf_smote_tomek.predict(X_test)
-
-    # cm_rf_smote_tomek = confusion_matrix(y_test, y_pred_rf_smote_tomek)
-    # cm_rf_smote_tomek_normalized = cm_rf_smote_tomek.astype(
-    #     "float"
-    # ) / cm_rf_smote_tomek.sum(axis=1, keepdims=True)
-
-
-    # # SMOTEENN
-    # smote_enn = SMOTEENN(random_state=42)
-    # X_resampled_smote_enn, y_resampled_smote_enn = smote_enn.fit_resample(X_train, y_train)
-    # rf_smote_enn = RandomForestClassifier(random_state=42)
-    # rf_smote_enn.fit(X_resampled_smote_enn, y_resampled_smote_enn)
-
-    # y_pred_rf_smote_enn = rf_smote_enn.predict(X_test)
-
-    # cm_rf_smote_enn = confusion_matrix(y_test, y_pred_rf_smote_enn)
-    # cm_rf_smote_enn_normalized = cm_rf_smote_enn.astype("float") / cm_rf_smote_enn.sum(
-    #     axis=1, keepdims=True
-    # )
-    return
+        rf_results[rf_config["name"]] = {"model": model, "cm": cm, "cm_norm": cm_norm}
+    return rf_results, undersampled_data
 
 
 @app.cell
@@ -945,15 +899,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    cm_rf_balanced,
-    cm_rf_smote_enn,
-    cm_rf_smote_tomek,
-    cm_rf_undersampled,
-    go,
-    make_subplots,
-    mo,
-):
+def _(go, make_subplots, mo, rf_results):
     labels = ["No Subscription", "Subscription"]
 
     fig_rf_resampled_total = make_subplots(
@@ -967,22 +913,17 @@ def _(
         ],
     )
 
-    for i_resampled_total, cm_norm_resampled_total in enumerate(
-        [
-            cm_rf_undersampled,
-            cm_rf_balanced,
-            cm_rf_smote_tomek,
-            cm_rf_smote_enn,
-        ]
+    for i_resampled_total, (rf_name_total, rf_result_total) in enumerate(
+        rf_results.items()
     ):
         row_resampled_total = i_resampled_total // 2 + 1
         col_resampled_total = i_resampled_total % 2 + 1
         fig_rf_resampled_total.add_trace(
             go.Heatmap(
-                z=cm_norm_resampled_total,
+                z=rf_result_total["cm"],
                 x=labels,
                 y=labels,
-                text=cm_norm_resampled_total,
+                text=rf_result_total["cm"],
                 texttemplate="%{text:,d}",
                 colorscale="Blues",
                 showscale=(i_resampled_total == 0),
@@ -1007,16 +948,7 @@ def _(
 
 
 @app.cell
-def _(
-    cm_rf_balanced_normalized,
-    cm_rf_smote_enn_normalized,
-    cm_rf_smote_tomek_normalized,
-    cm_rf_undersampled_normalized,
-    go,
-    labels,
-    make_subplots,
-    mo,
-):
+def _(go, labels, make_subplots, mo, rf_results):
     fig_rf_resampled = make_subplots(
         rows=2,
         cols=2,
@@ -1028,22 +960,15 @@ def _(
         ],
     )
 
-    for i_resampled, cm_norm_resampled in enumerate(
-        [
-            cm_rf_undersampled_normalized,
-            cm_rf_balanced_normalized,
-            cm_rf_smote_tomek_normalized,
-            cm_rf_smote_enn_normalized,
-        ]
-    ):
+    for i_resampled, (rf_name, rf_result) in enumerate(rf_results.items()):
         row_resampled = i_resampled // 2 + 1
         col_resampled = i_resampled % 2 + 1
         fig_rf_resampled.add_trace(
             go.Heatmap(
-                z=cm_norm_resampled,
+                z=rf_result["cm_norm"],
                 x=labels,
                 y=labels,
-                text=cm_norm_resampled.round(2),
+                text=rf_result["cm_norm"].round(2),
                 texttemplate="%{text:.2%}",
                 colorscale="Blues",
                 zmin=0,
@@ -1110,8 +1035,8 @@ def _(mo):
 
 
 @app.cell
-def _(X_test, precision_recall_curve, rf_undersampled, y_test):
-    y_prob_rf = rf_undersampled.predict_proba(X_test)[:, 1]
+def _(X_test, precision_recall_curve, rf_results, y_test):
+    y_prob_rf = rf_results["Undersampled"]["model"].predict_proba(X_test)[:, 1]
     precisions_rf, recalls_rf, thresholds_rf = precision_recall_curve(y_test, y_prob_rf)
     return precisions_rf, recalls_rf, thresholds_rf
 
@@ -1666,7 +1591,6 @@ def _(
             )
             for metric in ["recall", "accuracy"]
         }
-
     return (xgb_ml2_cv_results,)
 
 
