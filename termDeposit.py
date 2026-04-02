@@ -85,7 +85,7 @@ def _(mo):
     - Min balance is -8019 which seems quite high. But it could make sense if the spending habits are horrible. Also this is average over the year. The spending could be much larger in specific months and does not really represent the entire year.
     - The std for balance seems very large but it does make sense given that the min is -8019, while the median is 407. The max is also 102,127, which contributes to the large std. Since median < mean, this suggests that we have a right skewed distribution. We quantify this later.
 
-    **Note**: `duration` is the length of the phone call in seconds. This is a target leakage variable because we only know the value after the call has ended. At prediction time (before calling a customer), this feature won't exist yet. It should be excluded from the final model or carefully evaluated (test with and without) otherwise it will likely inflate accuracy artificially.
+    **Note**: `duration` is the length of the phone call in seconds. This is a target leakage variable because we only know the value after the call has ended. At prediction time (before calling a customer), this feature won't exist yet. Therefore, we have to be careful about using this feature in our models as it might inflate accuracy artifically.
     """)
     return
 
@@ -513,8 +513,10 @@ def _(df_collected, go, make_subplots, mo):
     for i_numerical, col_numerical in enumerate(num_cols):
         row_numerical = i_numerical // 2 + 1
         col_idx_numerical = i_numerical % 2 + 1
+
         for y_val, color in [("no", "#636EFA"), ("yes", "#EF553B")]:
             subset = df_collected.filter(df_collected["y"] == y_val)
+
             if (
                 col_numerical == "campaign"
             ):  # box plot for campaign due to being a discrete variable
@@ -676,13 +678,19 @@ def _(mo):
 
     - Class balance analysis reveals that there's a predominant amount of non subscribers (~93%). This requires careful handling: maybe use stratified sampling, class weights or appropriate evaluation metrics (e.g. precision-recall, F1, AUC-ROC or recall instead of accuracy).
 
-    - Balance, duration and campaign contain extreme values (kurtosis ~36-142). Valid according to the domain and not data errors. We will approach it more rigorously by using sensitivity analysis during our modeling phase.
+    - Balance, duration and campaign contain extreme values (kurtosis ~36-142). Valid according to the domain and not data errors. We should use Tree based models because they are robust to these extreme values.
 
-    - Features with the strongest signals: job, education, marital status and housing.
+    - Features with the highest variation in subscription rates: job, education, marital status and housing.
 
     - Weak individual correlations with the target y: all features were < 0.06 Spearman (not including duration). Feature interactions will probably be necessary and tree based ensemble methods will most likely be the best model.
 
     - Default is dropped because it has essentially no variance.
+
+    Therefore the segments to prioritize are:
+
+    - Students (15.6% conversion), retirees (10.5%)
+    - Tertiary education (9.2%), single (9.4%), no housing loan (9.0%)
+    - Management is the highest volume high conversion segment.
     """)
     return
 
@@ -703,7 +711,7 @@ def _(mo):
     We propose a multi layered ML system:
 
     1. ML1 (Pre call filter): Use features known before a call (age, job, marital, education, balance, housing, loan) with the goal of reducing the 40,000 customers to a targeted subset.
-    2. ML2 (Optimizer): Use features known after a call (contact, campaign, month, duration) and prioritize customers to keep calling. That is, which customers are more likely to say yes to subscribing and keep calling these type of customers.
+    2. ML2 (Optimizer): Prioritize customers to keep calling by identifying features that indicate high probability of subscribing. That is, which customers are more likely to say yes to subscribing and keep calling these type of customers.
     """)
     return
 
@@ -830,56 +838,19 @@ def _(mo):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ##### Undersampling, Class Weight Adjustment and Random Forest Classifier
+    """)
+    return
+
+
 @app.cell
 def _(
     RandomForestClassifier,
     RandomUnderSampler,
-    X_test,
-    X_train,
-    confusion_matrix,
-    y_test,
-    y_train,
-):
-    undersampled_data = RandomUnderSampler(random_state=42).fit_resample(X_train, y_train)
-    rf_undersampled = RandomForestClassifier(random_state=42)
-    rf_undersampled.fit(*undersampled_data)
-    y_pred_rf = rf_undersampled.predict(X_test)
-
-    cm_rf_undersampled = confusion_matrix(y_test, y_pred_rf)
-    cm_rf_undersampled_normalized = cm_rf_undersampled.astype(
-        "float"
-    ) / cm_rf_undersampled.sum(axis=1, keepdims=True)
-    return (
-        cm_rf_undersampled,
-        cm_rf_undersampled_normalized,
-        rf_undersampled,
-        undersampled_data,
-    )
-
-
-@app.cell
-def _(
-    RandomForestClassifier,
-    X_test,
-    X_train,
-    confusion_matrix,
-    y_test,
-    y_train,
-):
-    rf_balanced = RandomForestClassifier(class_weight="balanced", random_state=42)
-    rf_balanced.fit(X_train, y_train)
-    y_pred_rf_balanced = rf_balanced.predict(X_test)
-
-    cm_rf_balanced = confusion_matrix(y_test, y_pred_rf_balanced)
-    cm_rf_balanced_normalized = cm_rf_balanced.astype("float") / cm_rf_balanced.sum(
-        axis=1, keepdims=True
-    )
-    return cm_rf_balanced, cm_rf_balanced_normalized
-
-
-@app.cell
-def _(
-    RandomForestClassifier,
+    SMOTEENN,
     SMOTETomek,
     X_test,
     X_train,
@@ -887,44 +858,82 @@ def _(
     y_test,
     y_train,
 ):
-    smote_tomek = SMOTETomek(random_state=42)
-    X_resampled_smote_tomek, y_resampled_smote_tomek = smote_tomek.fit_resample(
-        X_train, y_train
-    )
-    rf_smote_tomek = RandomForestClassifier(random_state=42)
-    rf_smote_tomek.fit(X_resampled_smote_tomek, y_resampled_smote_tomek)
+    undersampled_data = RandomUnderSampler(random_state=42).fit_resample(X_train, y_train)
 
-    y_pred_rf_smote_tomek = rf_smote_tomek.predict(X_test)
+    rf_configs = [
+        {"name": "Undersampled", "data": undersampled_data, "params": {}},
+        {"name": "Balanced Weights", "data": (X_train, y_train), "params": {"class_weight": "balanced"}},
+        {"name": "SMOTE-Tomek", "data": SMOTETomek(random_state=42).fit_resample(X_train, y_train), "params": {}},
+        {"name": "SMOTE-ENN", "data": SMOTEENN(random_state=42).fit_resample(X_train, y_train), "params": {}},
+    ]
 
-    cm_rf_smote_tomek = confusion_matrix(y_test, y_pred_rf_smote_tomek)
-    cm_rf_smote_tomek_normalized = cm_rf_smote_tomek.astype(
-        "float"
-    ) / cm_rf_smote_tomek.sum(axis=1, keepdims=True)
-    return cm_rf_smote_tomek, cm_rf_smote_tomek_normalized
+    rf_results = {}
+    for config in rf_configs:
+        model = RandomForestClassifier(random_state=42, **config["params"])
+        model.fit(*config["data"])
+        y_pred = model.predict(X_test)
+        cm = confusion_matrix(y_test, y_pred)
+        cm_norm = cm.astype("float") / cm.sum(axis=1, keepdims=True)
+        rf_results[config["name"]] = {"model": model, "cm": cm, "cm_norm": cm_norm}
+
+    return (undersampled_data,)
 
 
 @app.cell
-def _(
-    RandomForestClassifier,
-    SMOTEENN,
-    X_test,
-    X_train,
-    confusion_matrix,
-    y_test,
-    y_train,
-):
-    smote_enn = SMOTEENN(random_state=42)
-    X_resampled_smote_enn, y_resampled_smote_enn = smote_enn.fit_resample(X_train, y_train)
-    rf_smote_enn = RandomForestClassifier(random_state=42)
-    rf_smote_enn.fit(X_resampled_smote_enn, y_resampled_smote_enn)
+def _():
+    # undersampled_data = RandomUnderSampler(random_state=42).fit_resample(X_train, y_train)
+    # rf_undersampled = RandomForestClassifier(random_state=42)
+    # rf_undersampled.fit(*undersampled_data)
+    # y_pred_rf = rf_undersampled.predict(X_test)
 
-    y_pred_rf_smote_enn = rf_smote_enn.predict(X_test)
 
-    cm_rf_smote_enn = confusion_matrix(y_test, y_pred_rf_smote_enn)
-    cm_rf_smote_enn_normalized = cm_rf_smote_enn.astype("float") / cm_rf_smote_enn.sum(
-        axis=1, keepdims=True
-    )
-    return cm_rf_smote_enn, cm_rf_smote_enn_normalized
+    # # Undersampled
+    # cm_rf_undersampled = confusion_matrix(y_test, y_pred_rf)
+    # cm_rf_undersampled_normalized = cm_rf_undersampled.astype(
+    #     "float"
+    # ) / cm_rf_undersampled.sum(axis=1, keepdims=True)
+
+
+    # # Balanced weights
+    # rf_balanced = RandomForestClassifier(class_weight="balanced", random_state=42)
+    # rf_balanced.fit(X_train, y_train)
+    # y_pred_rf_balanced = rf_balanced.predict(X_test)
+
+    # cm_rf_balanced = confusion_matrix(y_test, y_pred_rf_balanced)
+    # cm_rf_balanced_normalized = cm_rf_balanced.astype("float") / cm_rf_balanced.sum(
+    #     axis=1, keepdims=True
+    # )
+
+
+    # # SMOTETOMEK
+    # smote_tomek = SMOTETomek(random_state=42)
+    # X_resampled_smote_tomek, y_resampled_smote_tomek = smote_tomek.fit_resample(
+    #     X_train, y_train
+    # )
+    # rf_smote_tomek = RandomForestClassifier(random_state=42)
+    # rf_smote_tomek.fit(X_resampled_smote_tomek, y_resampled_smote_tomek)
+
+    # y_pred_rf_smote_tomek = rf_smote_tomek.predict(X_test)
+
+    # cm_rf_smote_tomek = confusion_matrix(y_test, y_pred_rf_smote_tomek)
+    # cm_rf_smote_tomek_normalized = cm_rf_smote_tomek.astype(
+    #     "float"
+    # ) / cm_rf_smote_tomek.sum(axis=1, keepdims=True)
+
+
+    # # SMOTEENN
+    # smote_enn = SMOTEENN(random_state=42)
+    # X_resampled_smote_enn, y_resampled_smote_enn = smote_enn.fit_resample(X_train, y_train)
+    # rf_smote_enn = RandomForestClassifier(random_state=42)
+    # rf_smote_enn.fit(X_resampled_smote_enn, y_resampled_smote_enn)
+
+    # y_pred_rf_smote_enn = rf_smote_enn.predict(X_test)
+
+    # cm_rf_smote_enn = confusion_matrix(y_test, y_pred_rf_smote_enn)
+    # cm_rf_smote_enn_normalized = cm_rf_smote_enn.astype("float") / cm_rf_smote_enn.sum(
+    #     axis=1, keepdims=True
+    # )
+    return
 
 
 @app.cell
@@ -1065,7 +1074,7 @@ def _(mo):
     mo.md(r"""
     We see that 1:1 undersampling is the best strategy, identifying ~56% of subscribers. All other strategies are mostly predicting 'no' for most observations.
 
-    However 56% recall with 43% false positive rate is still not great. It's almost the same as random chance (50%).
+    However 56% recall with 43% false positive rate is still not great.
 
     - Out of 8000 test customers, the model would call 3505 (predicted 'yes': 3182 + 323). Of those 323 are actual subscribers.
     - 256 subscribers were missed
@@ -1135,13 +1144,13 @@ def _(mo):
     mo.md(r"""
     The precision-recall curve shows that:
 
-    - At threshold ~0.2, we catch ~92% of subscribers (recall ~92%) but ~93% would be predicted 'yes' are false positives (~%7 precision).
-    - At threshold ~0.5 (default), we catch ~53% with precision ~%9, slightly better precision.
+    - At threshold ~0.2, we catch ~92% of subscribers (recall ~92%) but ~93% would be predicted 'yes' are false positives (~7% precision).
+    - At threshold ~0.5 (default), we catch ~53% with precision ~9%, slightly better precision.
     - Higher thresholds reduce calls but miss more subscribers.
 
     Random Forest with undersampling provided us with a baseline.
 
-    We now try XGBoost, which uses gradient boosting (seqential tree building that corrects previous errors) with the `scale_pos_weight` parameter, which allows us to control emphasis on predicting subscribers.
+    We now try XGBoost, which uses gradient boosting (sequential tree building that corrects previous errors) with the `scale_pos_weight` parameter, which allows us to control emphasis on predicting subscribers.
 
     First we try with undersampling, then with class weight tuning (without undersample) and lastly with both.
     """)
@@ -1193,6 +1202,7 @@ def _(
     ]
 
     xgb_results = {}
+
     for config in xgb_configs:
         xgb_model = XGBClassifier(random_state=42, **config["params"])
         xgb_model.fit(*config["data"])
@@ -1205,6 +1215,14 @@ def _(
             "cm_norm": xgb_cm_norm,
         }
     return (xgb_results,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ##### Confusion Matrices
+    """)
+    return
 
 
 @app.cell
@@ -1292,11 +1310,19 @@ def _(mo):
     - With class weight = 2, we have ~77% recall, with a false positive rate of ~67%, which is manageable. We'd catch most subscribers while cutting the call list by ~1/3.
     - Class weight = 5, we have ~88% recall, with a false positive rate of ~84%.
     - Class weight = 10, we have ~93% recall, with a false positive rate of ~89%.
-    - Class weight = autoscaled, performed worst than our baseline.
+    - Class weight = autoscaled, performed worse than our baseline.
 
     Class weight = 2 might be the sweet spot for us.
 
     Let's validate these results with cross validation and check if the 77% recall is actually stable or just lucky.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ##### Cross Validation
     """)
     return
 
@@ -1309,7 +1335,6 @@ def _(
     X,
     XGBClassifier,
     cross_val_score,
-    mo,
     y,
 ):
     xgb_cv_pipeline = ImbPipeline(  # Use imbpipeline to ensure that the undersampling is done within each fold of the cross-validation, preventing data leakage.
@@ -1325,10 +1350,19 @@ def _(
         xgb_cv_pipeline, X, y, cv=xgb_cv_folds, scoring="recall"
     )
 
+    xgb_acc_scores_cv = cross_val_score(
+        xgb_cv_pipeline, X, y, cv=xgb_cv_folds, scoring="accuracy"
+    )
+    return xgb_acc_scores_cv, xgb_recall_scores_cv
+
+
+@app.cell
+def _(mo, xgb_acc_scores_cv, xgb_recall_scores_cv):
     mo.md(f"""
     **5 Fold Cross Validation Scores (XGBoost Undersampled + Weight 2)**
 
     - Recall per fold: {[f"{s:.2%}" for s in xgb_recall_scores_cv]}
+    - Accuracy per fold: {[f"{s:.2%}" for s in xgb_acc_scores_cv]}"
     - Mean recall: {xgb_recall_scores_cv.mean():.2%}
     - Std: {xgb_recall_scores_cv.std():.2%}
     """)
@@ -1338,13 +1372,50 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The results are verified and we get ~76% recall consistently. So ML1 can now identify ~3 out of 4 potential subscribers before we make any calls.
+    The results are verified and we get ~76% recall consistently (accuracy is low due to optimizing for recall on minority class).
+
+    ML1 can now identify ~3 out of 4 potential subscribers before we make any calls.
 
     Applied to the full 40,000 customers, this means that
 
     - ~2235 out of ~2895 actual subscribers would be correctly flagged for calling
     - The call list would be reduced from 40,000 to 27,195
     - ~660 subscribers would be missed
+
+    Let's see which features were most important to our model.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ##### Feature Importance
+    """)
+    return
+
+
+@app.cell
+def _(X, pd, xgb_results):
+    ml1_xgb_feature_importance = xgb_results["Undersampled + Weight 2"][
+        "model"
+    ].feature_importances_
+
+    ml1_xgb_feature_importance_df = pd.DataFrame(
+        {
+            "feature": X.columns,
+            "importance": ml1_xgb_feature_importance,
+        }
+    ).sort_values("importance", ascending=False)
+
+    ml1_xgb_feature_importance_df
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The features are quite uniform in that no single feature dominates and is what we previously saw in our EDA. This shows why ML1 struggled in performance.
 
     Now that we have a reduced list of customers to call, we develop ML2, which will help us identify which customers are more likely to say yes and to keep calling.
     """)
@@ -1354,7 +1425,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## ML2: Optimizer
+    ## ML2: Optimizer with XGBoost
     """)
     return
 
@@ -1444,6 +1515,7 @@ def _(
     ]
 
     xgb_results_ml2 = {}
+
     for config_ml2 in xgb_configs_ml2:
         xgb_model_ml2 = XGBClassifier(random_state=42, **config_ml2["params"])
         xgb_model_ml2.fit(*config_ml2["data"])
@@ -1456,6 +1528,14 @@ def _(
             "cm_norm": xgb_cm_norm_ml2,
         }
     return (xgb_results_ml2,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ##### Confusion Matrices
+    """)
+    return
 
 
 @app.cell
@@ -1538,6 +1618,14 @@ def _(go, labels, make_subplots, mo, xgb_results_ml2):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ##### Cross Validation
+    """)
+    return
+
+
 @app.cell
 def _(
     ImbPipeline,
@@ -1546,43 +1634,73 @@ def _(
     XGBClassifier,
     X_ml2,
     cross_val_score,
-    mo,
     y,
 ):
-    xgb_ml2_cv_undersampled = ImbPipeline(
-        [
-            ("undersampler", RandomUnderSampler(random_state=42)),
-            ("classifier", XGBClassifier(random_state=42)),
-        ]
-    )
-
-    xgb_ml2_cv_weighted_auto = XGBClassifier(
-        random_state=42,
-        scale_pos_weight=len(y[y == 0]) / len(y[y == 1]),
-    )
+    xgb_ml2_cv_configs = [
+        {
+            "name": "XGBoost Undersampled",
+            "model": ImbPipeline(
+                [
+                    ("undersampler", RandomUnderSampler(random_state=42)),
+                    ("classifier", XGBClassifier(random_state=42)),
+                ]
+            ),
+        },
+        {
+            "name": "XGBoost Class Weighted (autoscaled)",
+            "model": XGBClassifier(
+                random_state=42,
+                scale_pos_weight=len(y[y == 0]) / len(y[y == 1]),
+            ),
+        },
+    ]
 
     xgb_ml2_cv_folds = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
-    xgb_ml2_cv_scores_undersampled = cross_val_score(
-        xgb_ml2_cv_undersampled, X_ml2, y, cv=xgb_ml2_cv_folds, scoring="recall"
-    )
+    xgb_ml2_cv_results = {}
 
-    xgb_ml2_recall_scores_weighted_cv_auto = cross_val_score(
-        xgb_ml2_cv_weighted_auto, X_ml2, y, cv=xgb_ml2_cv_folds, scoring="recall"
-    )
+    for xgb_ml2_cv_config in xgb_ml2_cv_configs:
+        xgb_ml2_cv_results[xgb_ml2_cv_config["name"]] = {
+            metric: cross_val_score(
+                xgb_ml2_cv_config["model"], X_ml2, y, cv=xgb_ml2_cv_folds, scoring=metric
+            )
+            for metric in ["recall", "accuracy"]
+        }
 
-    mo.md(f"""
-    5 Fold Cross Validation Scores (ML2)
+    return (xgb_ml2_cv_results,)
 
-    XGBoost Undersampled:
-    - Recall per fold: {[f"{s:.2%}" for s in xgb_ml2_cv_scores_undersampled]}
-    - Mean recall: {xgb_ml2_cv_scores_undersampled.mean():.2%}
-    - Std: {xgb_ml2_cv_scores_undersampled.std():.2%}
 
-    XGBoost Class Weighted (autoscaled without undersampling):
-    - Recall per fold: {[f"{s:.2%}" for s in xgb_ml2_recall_scores_weighted_cv_auto]}
-    - Mean recall: {xgb_ml2_recall_scores_weighted_cv_auto.mean():.2%}
-    - Std: {xgb_ml2_recall_scores_weighted_cv_auto.std():.2%}
+@app.cell
+def _(mo, xgb_ml2_cv_results):
+    xgb_ml2_cv_output = "**5 Fold Cross Validation Scores (ML2)**\n\n"
+
+    for name, scores in xgb_ml2_cv_results.items():
+        xgb_ml2_cv_output += f"**{name}:**\n"
+
+        for metric, values in scores.items():
+            xgb_ml2_cv_output += (
+                f"- {metric.capitalize()} per fold: {[f'{s:.2%}' for s in values]}\n"
+            )
+
+        xgb_ml2_cv_output += f"- Mean recall: {scores['recall'].mean():.2%}\n"
+
+        xgb_ml2_cv_output += f"- Std: {scores['recall'].std():.2%}\n\n"
+
+    mo.md(xgb_ml2_cv_output)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    All variants for ML2 performed well! And we hit a ceiling of 96% recall with ML2 undersampled + weight 5 and weight 10.
+
+    We also see that
+
+    - Class weight (auto) has the best precision (457/(457+646) ~= 41%) while maintaining ~79% recall. A strong result.
+    - The undersampled version has ~90% recall (from cross validation) with a false positive rate of ~14% for non subscribers. A very strong result and is our best choice as verified by cross validation. It also corresponds with ML2's goal of catching more subscribers.
+
+    Now just as we did for ML1, let's see which features were most important to the ML2.
     """)
     return
 
@@ -1590,12 +1708,188 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    All variants performed well! And we hit a ceiling of 96% recall in the undersampled + weight 5 and 10.
+    ##### Feature Importance
+    """)
+    return
 
-    We also see that
 
-    - Class weight (auto) has the best precision (457/(457+646) ~= 41%) while maintaining ~79% recall. A strong result.
-    - The undersampled version has ~90% recall with a false positive rate of ~14%. A very strong result and is our best choice as verified by cross validation. It also corresponds with ML2's goal of catching more subscribers.
+@app.cell
+def _(X_ml2, pd, xgb_results_ml2):
+    ml2_xgb_feature_importance = xgb_results_ml2["Undersampled"][
+        "model"
+    ].feature_importances_
+
+    ml2_xgb_feature_importance_df = pd.DataFrame(
+        {
+            "feature": X_ml2.columns,
+            "importance": ml2_xgb_feature_importance,
+        }
+    ).sort_values("importance", ascending=False)
+
+    ml2_xgb_feature_importance_df
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The `month_mar` and `month_oct` features dominate, which our EDA flagged as having extremely high subscription rates.
+
+    It's followed by `month_jul`, `month_aug` and `duration`.
+
+    `duration` is surprising because we had 0.33 Spearman correlation but lower importance compared to some of the month features, which suggests that month features are capturing some of the same information as duration (e.g. calls in Mar/Oct may be longer because people are more receptive in those months). It could be that the tree is splitting on month first, which reduces `duration`'s residual importance.
+
+    Pre call features were weak predictors (bottom of the list).
+
+    This shows us that the timing of the call matters more than duration or demographics.
+
+    However, we note that due to some month features having small sample sizes, the model may be overfitting these. We've already seen from our cross validation results that we had low standard deviation (+-0.97%) across 5 folds so the model is stable and not overfitting but let's also try training without month features to see what happens.
+    """)
+    return
+
+
+@app.cell
+def _(
+    RandomUnderSampler,
+    XGBClassifier,
+    confusion_matrix,
+    df_collected,
+    pd,
+    train_test_split,
+    y,
+):
+    ml2_features_no_month = [
+        "age",
+        "job",
+        "marital",
+        "education",
+        "balance",
+        "housing",
+        "loan",
+        "contact",
+        "campaign",
+        "day",
+        "duration",
+    ]
+
+    X_ml2_no_month = df_collected.select(ml2_features_no_month).to_pandas()
+
+    X_ml2_no_month = pd.get_dummies(X_ml2_no_month, drop_first=True)
+
+    X_train_ml2_no_month, X_test_ml2_no_month, y_train_ml2_no_month, y_test_ml2_no_month = (
+        train_test_split(X_ml2_no_month, y, test_size=0.2, random_state=42, stratify=y)
+    )
+
+    undersampled_data_ml2_no_month = RandomUnderSampler(random_state=42).fit_resample(
+        X_train_ml2_no_month, y_train_ml2_no_month
+    )
+
+    xgb_no_month = XGBClassifier(random_state=42)
+    xgb_no_month.fit(*undersampled_data_ml2_no_month)
+    y_pred_xgb_no_month = xgb_no_month.predict(X_test_ml2_no_month)
+
+    cm_no_month = confusion_matrix(y_test_ml2_no_month, y_pred_xgb_no_month)
+    cm_no_month_norm = cm_no_month.astype("float") / cm_no_month.sum(axis=1, keepdims=True)
+    return cm_no_month, cm_no_month_norm
+
+
+@app.cell
+def _(
+    cm_no_month,
+    cm_no_month_norm,
+    go,
+    labels,
+    make_subplots,
+    mo,
+    xgb_results_ml2,
+):
+    cms = [
+        (xgb_results_ml2["Undersampled"]["cm"], 1, 1),
+        (cm_no_month, 1, 2),
+        (xgb_results_ml2["Undersampled"]["cm_norm"], 2, 1),
+        (cm_no_month_norm, 2, 2),
+    ]
+
+    fig_xgb_cm_ml2_no_month = make_subplots(
+        rows=2,
+        cols=2,
+        subplot_titles=[
+            "With Month - Raw",
+            "Without Month - Raw",
+            "With Month - Normalized",
+            "Without Month - Normalized",
+        ],
+    )
+
+    for cm_data, row_ml2_cms, col_ml2_cms in cms:
+        is_norm = row_ml2_cms == 2
+        fig_xgb_cm_ml2_no_month.add_trace(
+            go.Heatmap(
+                z=cm_data,
+                x=labels,
+                y=labels,
+                text=cm_data.round(2) if is_norm else cm_data,
+                texttemplate="%{text:.2%}" if is_norm else "%{text:,d}",
+                colorscale="Blues",
+                zmin=0 if is_norm else None,
+                zmax=1 if is_norm else None,
+                showscale=False,
+            ),
+            row=row_ml2_cms,
+            col=col_ml2_cms,
+        )
+
+
+    fig_xgb_cm_ml2_no_month.update_xaxes(title_text="Predicted")
+    fig_xgb_cm_ml2_no_month.update_yaxes(title_text="True")
+    fig_xgb_cm_ml2_no_month.update_yaxes(autorange="reversed")
+
+    fig_xgb_cm_ml2_no_month.update_layout(
+        height=1000,
+        width=1000,
+        title_text="Confusion Matrices for XGBoost with and without Month Features",
+    )
+
+    mo.ui.plotly(fig_xgb_cm_ml2_no_month)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Removing the month feature drops recall from 92% to 85%, which is quite a drop but the model is still meaningful because duration and other features still provide a solid foundation.
+
+    This shows that month features are not overfitting and do carry real independent signals.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Conclusion
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    In conclusion, we created a multi layered ML system that filters unlikely subscribing customers before a call (ML1), reducing the original list from 40,000 to ~27,000 (~32% reduction) then helping the team identify which customers are worth prioritizing (ML2).
+
+    - ML1 (Pre call filter): XGBoost with undersampling + class weight 2 achieved ~76% recall. Reduced original list by 32%.
+    - ML2 (Optimizer): XGBoost with undersampling only achieved ~91% recall and ~86% accuracy (with 5-fold CV), which exceeds the 81% accuracy target.
+
+    Key Features and segments to prioritize:
+
+    - Students (15.6%) and retirees (10.5%) had high conversion rates.
+    - Management has the highest volume with a high conversion rate.
+    - Timing matters more than duration or demographics. March and October had the highest conversions.
+
+    Final Recommendations:
+
+    - Focus the campaign on March and October
+    - Prioritize management, students, and retirees
     """)
     return
 
