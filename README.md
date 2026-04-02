@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="img/numerical_violin" width="400">
+  <img src="img/numerical_violin.png" width="400">
 </p>
 
 # Predicting Term Deposit Subscriptions for a European Bank
