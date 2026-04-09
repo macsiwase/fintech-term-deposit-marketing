@@ -1856,7 +1856,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Timed Saved?
+    # Timed Saved?
     """)
     return
 
@@ -1881,7 +1881,7 @@ def _(df_collected, y_test):
         total_customers / len(y_test)
     )  # scale up the test set predictions to the full dataset size to estimate total calls and time spent.
 
-    # Baseline: calling everyone
+    # Baseline: call everyone
     baseline_calls = total_customers * avg_campaigns
     baseline_repeat_calls = total_customers * avg_repeat_campaigns
     baseline_hours = (baseline_calls * avg_duration_sec) / 3600
@@ -1924,10 +1924,11 @@ def _(
         xgb_time_rows.append(
             {
                 "model": f"ML1 ({xgb1_time_name})",
-                "customers_to_call": xgb1_time_predicted_yes,
+                "baseline_calls": baseline_calls,  # 40,000 customers * average calls per campaign
                 "total_calls": xgb1_time_calls_made,
-                "time_spent_hours": xgb1_time_spent_hours,
+                "customers_to_call": xgb1_time_predicted_yes,
                 "calls_saved": baseline_calls - xgb1_time_calls_made,
+                "time_spent_hours": xgb1_time_spent_hours,
                 "time_saved_hours": baseline_hours - xgb1_time_spent_hours,
             }
         )
@@ -1941,10 +1942,11 @@ def _(
         xgb_time_rows.append(
             {
                 "model": f"ML2 ({xgb2_time_name})",
-                "customers_to_call": xgb2_time_predicted_yes,
+                "baseline_calls": baseline_repeat_calls,  # 40,000 customers * (average calls per campaign - 1) because we are only saving repeat calls in ML2 since the first call has already been made for all customers.
                 "total_calls": xgb2_time_calls_made,
-                "time_spent_hours": xgb2_time_spent_hours,
+                "customers_to_call": xgb2_time_predicted_yes,
                 "calls_saved": baseline_repeat_calls - xgb2_time_calls_made,
+                "time_spent_hours": xgb2_time_spent_hours,
                 "time_saved_hours": baseline_repeat_hours - xgb2_time_spent_hours,
             }
         )
@@ -1961,9 +1963,16 @@ def _(pd, xgb_time_rows):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    We see that:
+    We see that after scaling,
 
-    -
+    - ML1 reduces the original call list from 115,287 to 27,195 saving 2612 hours.
+
+    ML2 then reduces that list further by focusing on customers that are more likely to subscribe. We have:
+
+    - ML2 undersampled reduces the call list to 7725 customers and saves 4300 hours.
+    - ML2 autoscaled reduces the list to 5515 customers and saves 4594 hours.
+
+    ML2 autoscaled is the clear winner in terms of hours saves and time spent on calls
     """)
     return
 
