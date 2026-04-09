@@ -77,7 +77,7 @@ Management is the highest-volume high-conversion segment.
 ### Key Features Driving Subscriptions
 
 <p align="center">
-  <img src="img/feature-importance.png" width="600">
+  <img src="img/feature-importance-comparison.png" width="600">
 </p>
 
 - **Timing matters most**: March and October had the highest conversion rates and dominated ML2's feature importance

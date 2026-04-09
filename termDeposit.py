@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.22.0"
+__generated_with = "0.23.0"
 app = marimo.App()
 
 
@@ -8,6 +8,7 @@ app = marimo.App()
 def _():
     import marimo as mo
     import polars as pl
+    import numpy as np
     import pandas as pd
     import plotly.express as px
     import plotly.graph_objects as go
@@ -986,7 +987,7 @@ def _(go, labels, make_subplots, mo, rf_results):
 @app.cell
 def _(mo):
     mo.md(r"""
-    We see that 1:1 undersampling is the best strategy, identifying ~56% of subscribers. All other strategies are mostly predicting 'no' for most observations.
+    We see that 1:1 undersampling is the best strategy, identifying ~56% of subscribers correctly. All other strategies are mostly predicting 'no' for most observations.
 
     However 56% recall with 43% false positive rate is still not great.
 
@@ -1266,25 +1267,22 @@ def _(
 
     xgb_cv_folds = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
-    xgb_recall_scores_cv = cross_val_score(
-        xgb_cv_pipeline, X, y, cv=xgb_cv_folds, scoring="recall"
-    )
-
-    xgb_acc_scores_cv = cross_val_score(
-        xgb_cv_pipeline, X, y, cv=xgb_cv_folds, scoring="accuracy"
-    )
-    return xgb_acc_scores_cv, xgb_recall_scores_cv
+    xgb_recall_scores_cv = {
+        metric: cross_val_score(xgb_cv_pipeline, X, y, cv=xgb_cv_folds, scoring=metric)
+        for metric in ["recall", "accuracy"]
+    }
+    return (xgb_recall_scores_cv,)
 
 
 @app.cell
-def _(mo, xgb_acc_scores_cv, xgb_recall_scores_cv):
+def _(mo, xgb_recall_scores_cv):
     mo.md(f"""
     **5 Fold Cross Validation Scores (XGBoost Undersampled + Weight 2)**
 
-    - Recall per fold: {[f"{s:.2%}" for s in xgb_recall_scores_cv]}
-    - Accuracy per fold: {[f"{s:.2%}" for s in xgb_acc_scores_cv]}"
-    - Mean recall: {xgb_recall_scores_cv.mean():.2%}
-    - Std: {xgb_recall_scores_cv.std():.2%}
+    - Recall per fold: {[f"{s:.2%}" for s in xgb_recall_scores_cv["recall"]]}
+    - Accuracy per fold: {[f"{s:.2%}" for s in xgb_recall_scores_cv["accuracy"]]}
+    - Mean recall: {xgb_recall_scores_cv["recall"].mean():.2%}
+    - Std: {xgb_recall_scores_cv["recall"].std():.2%}
     """)
     return
 
@@ -1622,10 +1620,12 @@ def _(mo):
 
     We also see that
 
-    - Class weight (auto) has the best precision (457/(457+646) ~= 41%) while maintaining ~79% recall. A strong result.
-    - The undersampled version has ~90% recall (from cross validation) with a false positive rate of ~14% for non subscribers. A very strong result and is our best choice as verified by cross validation. It also corresponds with ML2's goal of catching more subscribers.
+    - Class weight (autoscaled) has the best precision (457/(457+646) ~= 41%) while maintaining ~79% recall. A strong result. This means that the team will spend less time on repeated calls to non-subscribers.
+    - The undersampled version has ~90% recall (from cross validation) with a false positive rate of ~14% for non subscribers. A very strong result as well. It catches more subscribers than the autoscaled version but it also means the team will spend more time on repeated calls to non-subscribers.
 
-    Now just as we did for ML1, let's see which features were most important to the ML2.
+    Ultimately, it's a tradeoff between ML2 flagging less non-subscribers to call (more correct) but at the expense of catching less subscribers or flagging more non-subscribers to call at the expense of catching more subscribers.
+
+    Now just as we did for ML1, let's see which features were most important to ML2.
     """)
     return
 
@@ -1640,27 +1640,57 @@ def _(mo):
 
 @app.cell
 def _(X_ml2, pd, xgb_results_ml2):
-    ml2_xgb_feature_importance = xgb_results_ml2["Undersampled"][
-        "model"
-    ].feature_importances_
-
-    ml2_xgb_feature_importance_df = pd.DataFrame(
+    ml2_fi_comparison = pd.DataFrame(
         {
             "feature": X_ml2.columns,
-            "importance": ml2_xgb_feature_importance,
+            "undersampled": xgb_results_ml2["Undersampled"]["model"].feature_importances_,
+            "autoscaled": xgb_results_ml2["Class Weighted (autoscaled)"][
+                "model"
+            ].feature_importances_,
         }
-    ).sort_values("importance", ascending=False)
+    ).sort_values("undersampled", ascending=False)
 
-    ml2_xgb_feature_importance_df
+    ml2_fi_comparison
+
+    return (ml2_fi_comparison,)
+
+
+@app.cell
+def _(go, ml2_fi_comparison, mo):
+    fig_fi_comparison = go.Figure(
+        data=[
+            go.Bar(
+                name="Undersampled",
+                x=ml2_fi_comparison["feature"],
+                y=ml2_fi_comparison["undersampled"],
+            ),
+            go.Bar(
+                name="Autoscaled",
+                x=ml2_fi_comparison["feature"],
+                y=ml2_fi_comparison["autoscaled"],
+            ),
+        ]
+    )
+
+    fig_fi_comparison.update_layout(
+        barmode="group",
+        title_text="ML2 Feature Importance: Undersampled vs Autoscaled",
+        xaxis_title="Feature",
+        yaxis_title="Importance",
+        height=800,
+        width=1000,
+    )
+
+    mo.ui.plotly(fig_fi_comparison)
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The `month_mar` and `month_oct` features dominate, which our EDA flagged as having extremely high subscription rates.
+    Overall both models are similar in ranking with the `month_mar` feature dominating. Our earlier EDA also flagged this as having extremely high subscription rates.
 
-    It's followed by `month_jul`, `month_aug` and `duration`.
+    It's followed by `month_oct`, `month_jul`, `month_aug` and `duration` (`contact_unknown` is not a meaningful feature because it is not specific enough).
 
     `duration` is surprising because we had 0.33 Spearman correlation but lower importance compared to some of the month features, which suggests that month features are capturing some of the same information as duration (e.g. calls in Mar/Oct may be longer because people are more receptive in those months). It could be that the tree is splitting on month first, which reduces `duration`'s residual importance.
 
@@ -1668,7 +1698,7 @@ def _(mo):
 
     This shows us that the timing of the call matters more than duration or demographics.
 
-    However, we note that due to some month features having small sample sizes, the model may be overfitting these. We've already seen from our cross validation results that we had low standard deviation (+-0.97%) across 5 folds so the model is stable and not overfitting but let's also try training without month features to see what happens.
+    However, we note that due to some month features having small sample sizes, the models may be overfitting these. We've already seen from our cross validation results that we had low standard deviation across 5 folds so these models are stable and not overfitting but let's also try training without month features to see what happens.
     """)
     return
 
@@ -1697,9 +1727,10 @@ def _(
         "duration",
     ]
 
-    X_ml2_no_month = df_collected.select(ml2_features_no_month).to_pandas()
 
-    X_ml2_no_month = pd.get_dummies(X_ml2_no_month, drop_first=True)
+    X_ml2_no_month = pd.get_dummies(
+        df_collected.select(ml2_features_no_month).to_pandas(), drop_first=True
+    )
 
     X_train_ml2_no_month, X_test_ml2_no_month, y_train_ml2_no_month, y_test_ml2_no_month = (
         train_test_split(X_ml2_no_month, y, test_size=0.2, random_state=42, stratify=y)
@@ -1709,45 +1740,66 @@ def _(
         X_train_ml2_no_month, y_train_ml2_no_month
     )
 
-    xgb_no_month = XGBClassifier(random_state=42)
-    xgb_no_month.fit(*undersampled_data_ml2_no_month)
-    y_pred_xgb_no_month = xgb_no_month.predict(X_test_ml2_no_month)
+    no_month_configs = [
+        {"name": "Undersampled", "data": undersampled_data_ml2_no_month, "params": {}},
+        {
+            "name": "Class Weighted (autoscaled)",
+            "data": (X_train_ml2_no_month, y_train_ml2_no_month),
+            "params": {
+                "scale_pos_weight": len(y_train_ml2_no_month[y_train_ml2_no_month == 0])
+                / len(y_train_ml2_no_month[y_train_ml2_no_month == 1])
+            },
+        },
+    ]
 
-    cm_no_month = confusion_matrix(y_test_ml2_no_month, y_pred_xgb_no_month)
-    cm_no_month_norm = cm_no_month.astype("float") / cm_no_month.sum(axis=1, keepdims=True)
-    return cm_no_month, cm_no_month_norm
+    no_month_results = {}
+
+    for config_no_month in no_month_configs:
+        xgb_no_month_model = XGBClassifier(random_state=42, **config_no_month["params"])
+        xgb_no_month_model.fit(*config_no_month["data"])
+        y_pred_xgb_no_month = xgb_no_month_model.predict(X_test_ml2_no_month)
+        cm_no_month = confusion_matrix(y_test_ml2_no_month, y_pred_xgb_no_month)
+        cm_no_month_norm = cm_no_month.astype("float") / cm_no_month.sum(
+            axis=1, keepdims=True
+        )
+        no_month_results[config_no_month["name"]] = {
+            "model": xgb_no_month_model,
+            "cm": cm_no_month,
+            "cm_norm": cm_no_month_norm,
+        }
+    return (no_month_results,)
 
 
 @app.cell
-def _(
-    cm_no_month,
-    cm_no_month_norm,
-    go,
-    labels,
-    make_subplots,
-    mo,
-    xgb_results_ml2,
-):
+def _(go, labels, make_subplots, mo, no_month_results, xgb_results_ml2):
     cms = [
         (xgb_results_ml2["Undersampled"]["cm"], 1, 1),
-        (cm_no_month, 1, 2),
-        (xgb_results_ml2["Undersampled"]["cm_norm"], 2, 1),
-        (cm_no_month_norm, 2, 2),
+        (no_month_results["Undersampled"]["cm"], 1, 2),
+        (xgb_results_ml2["Undersampled"]["cm_norm"], 1, 3),
+        (no_month_results["Undersampled"]["cm_norm"], 1, 4),
+        (xgb_results_ml2["Class Weighted (autoscaled)"]["cm"], 2, 1),
+        (no_month_results["Class Weighted (autoscaled)"]["cm"], 2, 2),
+        (xgb_results_ml2["Class Weighted (autoscaled)"]["cm_norm"], 2, 3),
+        (no_month_results["Class Weighted (autoscaled)"]["cm_norm"], 2, 4),
     ]
 
     fig_xgb_cm_ml2_no_month = make_subplots(
         rows=2,
-        cols=2,
+        cols=4,
         subplot_titles=[
-            "With Month - Raw",
-            "Without Month - Raw",
-            "With Month - Normalized",
-            "Without Month - Normalized",
+            "Undersamp. w/ Month - Raw",
+            "Undersamp. w/o Month - Raw",
+            "Undersamp. w/ Month - Norm",
+            "Undersamp. w/o Month - Norm",
+            "Autoscaled w/ Month - Raw",
+            "Autoscaled w/o Month - Raw",
+            "Autoscaled w/ Month - Norm",
+            "Autoscaled w/o Month - Norm",
         ],
     )
 
     for cm_data, row_ml2_cms, col_ml2_cms in cms:
-        is_norm = row_ml2_cms == 2
+        is_norm = col_ml2_cms >= 3
         fig_xgb_cm_ml2_no_month.add_trace(
             go.Heatmap(
                 z=cm_data,
@@ -1769,12 +1821,16 @@ def _(
     fig_xgb_cm_ml2_no_month.update_yaxes(title_text="True", row=1, col=1)
     fig_xgb_cm_ml2_no_month.update_yaxes(title_text="True", row=2, col=1)
     fig_xgb_cm_ml2_no_month.update_yaxes(showticklabels=False, row=1, col=2)
+    fig_xgb_cm_ml2_no_month.update_yaxes(showticklabels=False, row=1, col=3)
+    fig_xgb_cm_ml2_no_month.update_yaxes(showticklabels=False, row=1, col=4)
     fig_xgb_cm_ml2_no_month.update_yaxes(showticklabels=False, row=2, col=2)
+    fig_xgb_cm_ml2_no_month.update_yaxes(showticklabels=False, row=2, col=3)
+    fig_xgb_cm_ml2_no_month.update_yaxes(showticklabels=False, row=2, col=4)
     fig_xgb_cm_ml2_no_month.update_yaxes(autorange="reversed")
 
     fig_xgb_cm_ml2_no_month.update_layout(
         height=800,
-        width=800,
+        width=1200,
         title_text="Confusion Matrices for XGBoost with and without Month Features",
     )
 
@@ -1785,9 +1841,14 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Removing the month feature drops recall from 92% to 85%, which is quite a drop but the model is still meaningful because duration and other features still provide a solid foundation.
+    Removing the month feature results in:
 
-    This shows that month features are not overfitting and do carry real independent signals.
+    - Undersampled: Recall dropping from 92% to 85% (-7%) and false positive rate increasing from 14% to 18% (+4%)
+    - Autoscaled: Recall dropping from 79% to 74% (-5%) and false positive rate increasing from 9% to 10% (+1%)
+
+    Both models are meaningful without the month features showing that these features are not overfitting and that the signal is real. Duration and other features still provide a solid foundation.
+
+    Note that the autoscaled model is more robust. It is less dependent on timing features and maintains a stable false positive rate. This means that call efficiency stays consistent even if the campaign timing changes in the future.
     """)
     return
 
@@ -1795,7 +1856,122 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Conclusion
+    ## Timed Saved?
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    It's great to see the number of potential future subscribers we can catch and focus on but how many hours would we actually save?
+    """)
+    return
+
+
+@app.cell
+def _(df_collected, y_test):
+    avg_duration_sec = df_collected["duration"].mean()
+    avg_campaigns = df_collected["campaign"].mean()
+    avg_repeat_campaigns = (
+        avg_campaigns - 1
+    )  # because the campaign count includes the current call, so repeat campaigns is one less than total campaigns.
+    total_customers = df_collected.height
+    scale = (
+        total_customers / len(y_test)
+    )  # scale up the test set predictions to the full dataset size to estimate total calls and time spent.
+
+    # Baseline: calling everyone
+    baseline_calls = total_customers * avg_campaigns
+    baseline_repeat_calls = total_customers * avg_repeat_campaigns
+    baseline_hours = (baseline_calls * avg_duration_sec) / 3600
+    baseline_repeat_hours = (baseline_repeat_calls * avg_duration_sec) / 3600
+    return (
+        avg_campaigns,
+        avg_duration_sec,
+        avg_repeat_campaigns,
+        baseline_calls,
+        baseline_hours,
+        baseline_repeat_calls,
+        baseline_repeat_hours,
+        scale,
+    )
+
+
+@app.cell
+def _(
+    avg_campaigns,
+    avg_duration_sec,
+    avg_repeat_campaigns,
+    baseline_calls,
+    baseline_hours,
+    baseline_repeat_calls,
+    baseline_repeat_hours,
+    scale,
+    xgb_results,
+    xgb_results_ml2,
+):
+    xgb_time_rows = []
+
+    for xgb1_time_name in ["Undersampled + Weight 2"]:
+        xgb1_time_cm = xgb_results[xgb1_time_name]["cm"]
+        xgb1_time_predicted_yes = (
+            xgb1_time_cm[0][1] + xgb1_time_cm[1][1]
+        ) * scale  # FP + TP scaled
+        xgb1_time_calls_made = xgb1_time_predicted_yes * avg_campaigns
+        xgb1_time_spent_hours = (xgb1_time_calls_made * avg_duration_sec) / 3600
+
+        xgb_time_rows.append(
+            {
+                "model": f"ML1 ({xgb1_time_name})",
+                "customers_to_call": xgb1_time_predicted_yes,
+                "total_calls": xgb1_time_calls_made,
+                "time_spent_hours": xgb1_time_spent_hours,
+                "calls_saved": baseline_calls - xgb1_time_calls_made,
+                "time_saved_hours": baseline_hours - xgb1_time_spent_hours,
+            }
+        )
+
+    for xgb2_time_name in ["Undersampled", "Class Weighted (autoscaled)"]:
+        xgb2_time_cm = xgb_results_ml2[xgb2_time_name]["cm"]
+        xgb2_time_predicted_yes = (xgb2_time_cm[0][1] + xgb2_time_cm[1][1]) * scale
+        xgb2_time_calls_made = xgb2_time_predicted_yes * avg_repeat_campaigns
+        xgb2_time_spent_hours = (xgb2_time_calls_made * avg_duration_sec) / 3600
+
+        xgb_time_rows.append(
+            {
+                "model": f"ML2 ({xgb2_time_name})",
+                "customers_to_call": xgb2_time_predicted_yes,
+                "total_calls": xgb2_time_calls_made,
+                "time_spent_hours": xgb2_time_spent_hours,
+                "calls_saved": baseline_repeat_calls - xgb2_time_calls_made,
+                "time_saved_hours": baseline_repeat_hours - xgb2_time_spent_hours,
+            }
+        )
+    return (xgb_time_rows,)
+
+
+@app.cell
+def _(pd, xgb_time_rows):
+    time_savings_df = pd.DataFrame(xgb_time_rows).round(0)
+    time_savings_df.sort_values("time_saved_hours", ascending=False)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    We see that:
+
+    -
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Conclusion (WIP)
     """)
     return
 
