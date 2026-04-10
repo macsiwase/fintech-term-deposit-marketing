@@ -10,13 +10,17 @@ def _():
     import polars as pl
     import numpy as np
     import pandas as pd
+    import duckdb as db
     import plotly.express as px
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
     from lazypredict.Supervised import LazyClassifier
     from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
     from sklearn.ensemble import RandomForestClassifier
-    from sklearn.metrics import confusion_matrix, precision_recall_curve
+    from sklearn.metrics import confusion_matrix, precision_recall_curve, silhouette_score
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.cluster import KMeans
+    from scipy.cluster.hierarchy import dendrogram, linkage
     from imblearn.under_sampling import RandomUnderSampler
     from imblearn.combine import SMOTETomek, SMOTEENN
     from imblearn.pipeline import Pipeline as ImbPipeline
@@ -24,15 +28,18 @@ def _():
 
     return (
         ImbPipeline,
+        KMeans,
         LazyClassifier,
         RandomForestClassifier,
         RandomUnderSampler,
         SMOTEENN,
         SMOTETomek,
+        StandardScaler,
         StratifiedKFold,
         XGBClassifier,
         confusion_matrix,
         cross_val_score,
+        db,
         go,
         make_subplots,
         mo,
@@ -40,6 +47,7 @@ def _():
         pl,
         precision_recall_curve,
         px,
+        silhouette_score,
         train_test_split,
     )
 
@@ -2037,14 +2045,161 @@ def _(mo):
     mo.md(r"""
     We see that after scaling,
 
-    - ML1 reduces the original customers call list from 115,287 to 27,195 (~32% reduction) saving 2612 hours (from 5,548 hours. saves ~32%).
+    - ML1 reduces the original customers call list from 40,000 to 27,195 (~32% reduction) cutting total initial call hours from 8161 to 5548 (~32% reduction).
 
-    ML2 then reduces that list further by focusing on customers that are more likely to subscribe. We have:
+    ML2 further optimizes by identifying which customers are worth calling repeatedly:
 
-    - ML2 undersampled reduces the call list to 7725 customers and saves 4300 hours.
-    - ML2 autoscaled reduces the list to 5515 customers and saves 4594 hours.
+    - ML2 undersampled: 7725 customers flagged for follow ups reducing repeat call hours from 5329 to 1029 (~81% reduction).
+    - ML2 autoscaled: 5515 customers flagged and repeat call hours are reduced to 735 (from 5329. ~86% reduction).
 
-    ML2 autoscaled is the clear winner in terms of hours saves and time spent on calls
+    ML2 autoscaled saves the most time while maintaining ~79% recall on subscribers.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Customer Segmentation
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Now that we have our models, we can use them to identify the high probability subscribers and understand what types of customers they are.
+
+    Clustering them allows us to create actionable customer profiles that help the team tailor their approach for each segment.
+
+    We start by filtering out non-subscribers then using KMeans and hierarchical clustering to cluster the subscribers then comparing both to see if they produce similar clusters.
+    """)
+    return
+
+
+@app.cell
+def _(StandardScaler, db, pd):
+    subscribers = db.sql("""
+        SELECT * FROM df_collected WHERE y = 'yes'
+        """).pl()
+
+    # We use the pre call features because we're interested in understanding the characteristics of customers who subscribe before the call begins.
+    cluster_features = ["age", "balance", "job", "marital", "education", "housing", "loan"]
+
+    # We need to encode and scale the features for KMeans because it uses distance (features with larger ranges would dominate over binary features).
+    subscribers_encoded = pd.get_dummies(
+        subscribers.select(cluster_features).to_pandas(), drop_first=True
+    )
+    subscribers_scaled = StandardScaler().fit_transform(subscribers_encoded)
+    return subscribers, subscribers_scaled
+
+
+@app.cell
+def _(KMeans, silhouette_score, subscribers_scaled):
+    # We also need to find the optimal number of clusters so we can use elbow method (plotting inertia for different k) for KMeans and silhouette scores (measures how similar each point is to its own cluster vs the nearest other cluster) for both KMeans and Hierarchical Clustering (use dendrogram instead of elbow/inertia).
+
+    k_range = range(
+        2, 11
+    )  # we need at least 2 clusters to segment customers, and we can try up to 10 clusters to see if there are more granular segments that are meaningful for marketing strategies. Having more than 10 clusters might be too impractical.
+    inertias = []
+    silhouette_scores = []
+
+    for k in k_range:
+        kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+        k_labels = kmeans.fit_predict(subscribers_scaled)
+        inertias.append(kmeans.inertia_)
+        silhouette_scores.append(silhouette_score(subscribers_scaled, k_labels))
+
+    return inertias, k_range, silhouette_scores
+
+
+@app.cell
+def _(go, inertias, k_range, make_subplots, mo, silhouette_scores):
+    fig_cluster = make_subplots(
+        rows=1,
+        cols=2,
+        subplot_titles=["Elbow Method", "Silhouette Score"],
+    )
+
+    fig_cluster.add_trace(
+        go.Scatter(x=list(k_range), y=inertias, mode="lines+markers"),
+        row=1,
+        col=1,
+    )
+
+    fig_cluster.add_trace(
+        go.Scatter(x=list(k_range), y=silhouette_scores, mode="lines+markers"),
+        row=1,
+        col=2,
+    )
+
+    fig_cluster.update_xaxes(title_text="k", dtick=1)
+    fig_cluster.update_yaxes(title_text="Inertia", row=1, col=1)
+    fig_cluster.update_yaxes(title_text="Silhouette Score", row=1, col=2)
+
+    fig_cluster.update_layout(height=600, width=1000, showlegend=False)
+
+    mo.ui.plotly(fig_cluster)
+
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    We see that:
+
+    - Elbow: There's no clear elbow. Inertia decreases monotonically.
+    - Silhouette: Monotonically increasing and peaks at k=10 (score ~ 0.29) suggesting that the data doesn't have well separated natural clusters and it could be beneficial to add more clusters. We should aim for a score of > 0.5 (typical good score).
+
+    Because of the nature of customer data (usually continuous and overlapping rather than neatly grouped), we see that there are no clear distinct clusters in the feature space.
+
+    Let's first try using k=4 because it gives the team a manageable number of segments to use.
+
+    We can adjust accordingly once we see the result.
+    """)
+    return
+
+
+@app.cell
+def _(KMeans, subscribers, subscribers_scaled):
+    kmeans_4 = KMeans(n_clusters=4, random_state=42, n_init=10)
+    subscriber_clusters = kmeans_4.fit_predict(subscribers_scaled)
+    subscribers_with_clusters = subscribers.to_pandas().assign(cluster=subscriber_clusters)
+
+    cluster_profiles = (
+        subscribers_with_clusters.groupby("cluster")
+        .agg(
+            age=("age", "mean"),
+            balance=("balance", "mean"),
+            job=("job", lambda x: x.mode()[0]),
+            marital=("marital", lambda x: x.mode()[0]),
+            education=("education", lambda x: x.mode()[0]),
+            housing=("housing", lambda x: x.mode()[0]),
+            loan=("loan", lambda x: x.mode()[0]),
+            count=("age", "size"),
+        )
+        .round(2)
+        .sort_values("count", ascending=False)
+    )
+    return (cluster_profiles,)
+
+
+@app.cell
+def _(cluster_profiles):
+    cluster_profiles
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    - The largest cluster consists of blue collar married homeowners with debt (1091).
+    - The second largest are educated, married people in management with no debt (754). They have one of the higher balances among all clusters.
+    - Next are young singles with secondary education (736).
+    - Finally we have wealthy married retirees with tertiary education and no debt (315).
+
+    These 4 clusters naturally separate based on age, job, type, marital status and housing, aligning with our EDA findings.
     """)
     return
 
