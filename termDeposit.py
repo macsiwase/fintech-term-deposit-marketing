@@ -13,6 +13,7 @@ def _():
     import duckdb as db
     import plotly.express as px
     import plotly.graph_objects as go
+    import plotly.figure_factory as ff
     from plotly.subplots import make_subplots
     from lazypredict.Supervised import LazyClassifier
     from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
@@ -40,9 +41,12 @@ def _():
         confusion_matrix,
         cross_val_score,
         db,
+        ff,
         go,
+        linkage,
         make_subplots,
         mo,
+        np,
         pd,
         pl,
         precision_recall_curve,
@@ -763,7 +767,7 @@ def _(df_collected, pd, pl, train_test_split):
 @app.cell
 def _(mo):
     mo.md(r"""
-    #### LazyPredict
+    ### LazyPredict
     """)
     return
 
@@ -842,7 +846,7 @@ def _(mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    #### Resampling
+    ### Resampling
     """)
     return
 
@@ -850,7 +854,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ##### Undersampling, Class Weight Adjustment and Random Forest Classifier
+    #### Undersampling, Class Weight Adjustment and Random Forest Classifier
     """)
     return
 
@@ -903,7 +907,7 @@ def _(
 @app.cell
 def _(mo):
     mo.md(r"""
-    ##### Confusion Matrices
+    #### Confusion Matrices
     """)
     return
 
@@ -1083,7 +1087,7 @@ def _(mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    #### XGBoost
+    ### XGBoost
     """)
     return
 
@@ -1143,7 +1147,7 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ##### Confusion Matrices
+    #### Confusion Matrices
     """)
     return
 
@@ -1251,7 +1255,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ##### Cross Validation
+    #### Cross Validation
     """)
     return
 
@@ -1316,7 +1320,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ##### Feature Importance
+    #### Feature Importance
     """)
     return
 
@@ -1459,7 +1463,7 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ##### Confusion Matrices
+    ### Confusion Matrices
     """)
     return
 
@@ -1553,7 +1557,7 @@ def _(go, labels, make_subplots, mo, xgb_results_ml2):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ##### Cross Validation
+    ### Cross Validation
     """)
     return
 
@@ -1641,7 +1645,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ##### Feature Importance
+    ### Feature Importance
     """)
     return
 
@@ -2036,7 +2040,6 @@ def _(
     fig_savings.update_layout(height=800, width=1400)
 
     mo.ui.plotly(fig_savings)
-
     return
 
 
@@ -2072,7 +2075,15 @@ def _(mo):
 
     Clustering them allows us to create actionable customer profiles that help the team tailor their approach for each segment.
 
-    We start by filtering out non-subscribers then using KMeans and hierarchical clustering to cluster the subscribers then comparing both to see if they produce similar clusters.
+    We start by filtering out non subscribers then use KMeans and hierarchical clustering to cluster subscribers and finally compare both to see if they produce similar clusters.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Filtering Non subscribers
     """)
     return
 
@@ -2094,9 +2105,17 @@ def _(StandardScaler, db, pd):
     return subscribers, subscribers_scaled
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### KMeans Clustering
+    """)
+    return
+
+
 @app.cell
 def _(KMeans, silhouette_score, subscribers_scaled):
-    # We also need to find the optimal number of clusters so we can use elbow method (plotting inertia for different k) for KMeans and silhouette scores (measures how similar each point is to its own cluster vs the nearest other cluster) for both KMeans and Hierarchical Clustering (use dendrogram instead of elbow/inertia).
+    # We also need to find the optimal number of clusters so we can use elbow method (plotting inertia for different k) for KMeans and silhouette scores (measures how similar each point is to its own cluster vs the nearest other cluster) for both KMeans and Hierarchical Clustering later (use dendrogram instead of elbow/inertia).
 
     k_range = range(
         2, 11
@@ -2109,7 +2128,6 @@ def _(KMeans, silhouette_score, subscribers_scaled):
         k_labels = kmeans.fit_predict(subscribers_scaled)
         inertias.append(kmeans.inertia_)
         silhouette_scores.append(silhouette_score(subscribers_scaled, k_labels))
-
     return inertias, k_range, silhouette_scores
 
 
@@ -2140,7 +2158,6 @@ def _(go, inertias, k_range, make_subplots, mo, silhouette_scores):
     fig_cluster.update_layout(height=600, width=1000, showlegend=False)
 
     mo.ui.plotly(fig_cluster)
-
     return
 
 
@@ -2156,7 +2173,7 @@ def _(mo):
 
     Let's first try using k=4 because it gives the team a manageable number of segments to use.
 
-    We can adjust accordingly once we see the result.
+    We can see if any meaningful clusters appear and adjust accordingly once we see the result.
     """)
     return
 
@@ -2200,6 +2217,62 @@ def _(mo):
     - Finally we have wealthy married retirees with tertiary education and no debt (315).
 
     These 4 clusters naturally separate based on age, job, type, marital status and housing, aligning with our EDA findings.
+
+    Before we decide to try other k values, let's try hierarchical clustering using dendrogram first to see what the natural cut points are and how many clusters the data naturally supports.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Hierarchical Clustering
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Initially, I tried to create the dendrogram with all 2900 subscribers but it kept crashing my VSCode.
+
+    For visualization purposes, I render the dendrogram on a random subsample of 500. The actual cluster assignments (afterwards) uses the full dataset.
+    """)
+    return
+
+
+@app.cell
+def _(ff, linkage, mo, np, subscribers_scaled):
+    np.random.seed(42)
+
+    sample_idx = np.random.choice(len(subscribers_scaled), size=500, replace=False)
+    subscribers_sample = subscribers_scaled[sample_idx]
+
+    fig_dendrogram = ff.create_dendrogram(
+        subscribers_sample,
+        linkagefun=lambda x: linkage(x, method="ward"),
+    )
+
+    fig_dendrogram.update_layout(
+        height=800,
+        width=1200,
+        title_text="Hierarchical Clustering: Dendrogram (Sample of 500 Subscribers)",
+    )
+
+    mo.ui.plotly(fig_dendrogram)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The dendrogram shows us that:
+
+    - At distance ~45, we have 2 clusters
+    - At distance ~35, we have 3 clusters
+    - At distance ~28, we have 4 clusters
+
+    Our choice of k=4 is validated by the dendrogram.
     """)
     return
 
