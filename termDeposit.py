@@ -1651,7 +1651,6 @@ def _(X_ml2, pd, xgb_results_ml2):
     ).sort_values("undersampled", ascending=False)
 
     ml2_fi_comparison
-
     return (ml2_fi_comparison,)
 
 
@@ -1895,6 +1894,7 @@ def _(df_collected, y_test):
         baseline_repeat_calls,
         baseline_repeat_hours,
         scale,
+        total_customers,
     )
 
 
@@ -1924,12 +1924,18 @@ def _(
         xgb_time_rows.append(
             {
                 "model": f"ML1 ({xgb1_time_name})",
-                "baseline_calls": baseline_calls,  # 40,000 customers * average calls per campaign
-                "total_calls": xgb1_time_calls_made,
+                "baseline_calls_no_ml": baseline_calls,  # 40,000 customers * average calls per campaign
+                "calls_eliminated": baseline_calls - xgb1_time_calls_made,
+                "total_calls_to_make": xgb1_time_calls_made,
                 "customers_to_call": xgb1_time_predicted_yes,
-                "calls_saved": baseline_calls - xgb1_time_calls_made,
-                "time_spent_hours": xgb1_time_spent_hours,
-                "time_saved_hours": baseline_hours - xgb1_time_spent_hours,
+                "pct_calls_eliminated(%)": (baseline_calls - xgb1_time_calls_made)
+                / baseline_calls
+                * 100,
+                "total_time_spent_hours": xgb1_time_spent_hours,
+                "total_time_saved_hours": baseline_hours - xgb1_time_spent_hours,
+                "pct_time_saved(%)": (baseline_hours - xgb1_time_spent_hours)
+                / baseline_hours
+                * 100,
             }
         )
 
@@ -1942,12 +1948,18 @@ def _(
         xgb_time_rows.append(
             {
                 "model": f"ML2 ({xgb2_time_name})",
-                "baseline_calls": baseline_repeat_calls,  # 40,000 customers * (average calls per campaign - 1) because we are only saving repeat calls in ML2 since the first call has already been made for all customers.
-                "total_calls": xgb2_time_calls_made,
+                "baseline_calls_no_ml": baseline_repeat_calls,  # 40,000 customers * (average calls per campaign - 1) because we are only saving repeat calls in ML2 since the first call has already been made for all customers.
+                "calls_eliminated": baseline_repeat_calls - xgb2_time_calls_made,
+                "total_calls_to_make": xgb2_time_calls_made,
                 "customers_to_call": xgb2_time_predicted_yes,
-                "calls_saved": baseline_repeat_calls - xgb2_time_calls_made,
-                "time_spent_hours": xgb2_time_spent_hours,
-                "time_saved_hours": baseline_repeat_hours - xgb2_time_spent_hours,
+                "pct_calls_eliminated(%)": (baseline_repeat_calls - xgb2_time_calls_made)
+                / baseline_repeat_calls
+                * 100,
+                "total_time_spent_hours": xgb2_time_spent_hours,
+                "total_time_saved_hours": baseline_repeat_hours - xgb2_time_spent_hours,
+                "pct_time_saved(%)": (baseline_repeat_hours - xgb2_time_spent_hours)
+                / baseline_repeat_hours
+                * 100,
             }
         )
     return (xgb_time_rows,)
@@ -1956,7 +1968,67 @@ def _(
 @app.cell
 def _(pd, xgb_time_rows):
     time_savings_df = pd.DataFrame(xgb_time_rows).round(0)
-    time_savings_df.sort_values("time_saved_hours", ascending=False)
+    time_savings_df.sort_values("total_time_saved_hours", ascending=False)
+    return (time_savings_df,)
+
+
+@app.cell
+def _(
+    baseline_repeat_hours,
+    go,
+    make_subplots,
+    mo,
+    time_savings_df,
+    total_customers,
+):
+    fig_savings = make_subplots(
+        rows=1,
+        cols=2,
+        subplot_titles=["Customers Call List", "Repeat Call Hours"],
+    )
+
+    fig_savings.add_trace(
+        go.Bar(
+            x=["Baseline", "After ML1"],
+            y=[total_customers, time_savings_df.iloc[0]["customers_to_call"]],
+            text=[
+                f"{total_customers:,}",
+                f"{time_savings_df.iloc[0]['customers_to_call']:,.0f} ({time_savings_df.iloc[0]['pct_calls_eliminated(%)']:.0f}% eliminated)",
+            ],
+            textposition="outside",
+            showlegend=False,
+        ),
+        row=1,
+        col=1,
+    )
+
+    fig_savings.add_trace(
+        go.Bar(
+            x=["Baseline\n(All Repeat Calls)", "ML2\n(Undersampled)", "ML2\n(Autoscaled)"],
+            y=[
+                baseline_repeat_hours,
+                time_savings_df.iloc[1]["total_time_spent_hours"],
+                time_savings_df.iloc[2]["total_time_spent_hours"],
+            ],
+            text=[
+                f"{baseline_repeat_hours:,.0f}h",
+                f"{time_savings_df.iloc[1]['total_time_spent_hours']:,.0f}h ({time_savings_df.iloc[1]['pct_time_saved(%)']:.0f}% saved)",
+                f"{time_savings_df.iloc[2]['total_time_spent_hours']:,.0f}h ({time_savings_df.iloc[2]['pct_time_saved(%)']:.0f}% saved)",
+            ],
+            textposition="outside",
+            showlegend=False,
+        ),
+        row=1,
+        col=2,
+    )
+
+    fig_savings.update_yaxes(title_text="Customers", row=1, col=1)
+    fig_savings.update_yaxes(title_text="Hours", row=1, col=2)
+
+    fig_savings.update_layout(height=800, width=1400)
+
+    mo.ui.plotly(fig_savings)
+
     return
 
 
@@ -1965,7 +2037,7 @@ def _(mo):
     mo.md(r"""
     We see that after scaling,
 
-    - ML1 reduces the original call list from 115,287 to 27,195 saving 2612 hours.
+    - ML1 reduces the original customers call list from 115,287 to 27,195 (~32% reduction) saving 2612 hours (from 5,548 hours. saves ~32%).
 
     ML2 then reduces that list further by focusing on customers that are more likely to subscribe. We have:
 
