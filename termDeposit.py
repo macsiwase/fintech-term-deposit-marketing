@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.0"
+__generated_with = "0.23.1"
 app = marimo.App()
 
 
@@ -21,7 +21,7 @@ def _():
     from sklearn.metrics import confusion_matrix, precision_recall_curve, silhouette_score
     from sklearn.preprocessing import StandardScaler
     from sklearn.cluster import KMeans
-    from scipy.cluster.hierarchy import dendrogram, linkage
+    from scipy.cluster.hierarchy import linkage, fcluster
     from imblearn.under_sampling import RandomUnderSampler
     from imblearn.combine import SMOTETomek, SMOTEENN
     from imblearn.pipeline import Pipeline as ImbPipeline
@@ -41,6 +41,7 @@ def _():
         confusion_matrix,
         cross_val_score,
         db,
+        fcluster,
         ff,
         go,
         linkage,
@@ -2113,6 +2114,14 @@ def _(mo):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### Elbow (Inertia) Method and Silhouette Scores
+    """)
+    return
+
+
 @app.cell
 def _(KMeans, silhouette_score, subscribers_scaled):
     # We also need to find the optimal number of clusters so we can use elbow method (plotting inertia for different k) for KMeans and silhouette scores (measures how similar each point is to its own cluster vs the nearest other cluster) for both KMeans and Hierarchical Clustering later (use dendrogram instead of elbow/inertia).
@@ -2178,11 +2187,20 @@ def _(mo):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### Clustering with K=4
+    """)
+    return
+
+
 @app.cell
 def _(KMeans, subscribers, subscribers_scaled):
     kmeans_4 = KMeans(n_clusters=4, random_state=42, n_init=10)
-    subscriber_clusters = kmeans_4.fit_predict(subscribers_scaled)
-    subscribers_with_clusters = subscribers.to_pandas().assign(cluster=subscriber_clusters)
+    subscribers_with_clusters = subscribers.to_pandas().assign(
+        cluster=kmeans_4.fit_predict(subscribers_scaled)
+    )
 
     cluster_profiles = (
         subscribers_with_clusters.groupby("cluster")
@@ -2199,7 +2217,7 @@ def _(KMeans, subscribers, subscribers_scaled):
         .round(2)
         .sort_values("count", ascending=False)
     )
-    return (cluster_profiles,)
+    return cluster_profiles, subscribers_with_clusters
 
 
 @app.cell
@@ -2241,12 +2259,22 @@ def _(mo):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### Dendrogram
+    """)
+    return
+
+
 @app.cell
 def _(ff, linkage, mo, np, subscribers_scaled):
     np.random.seed(42)
 
     sample_idx = np.random.choice(len(subscribers_scaled), size=500, replace=False)
     subscribers_sample = subscribers_scaled[sample_idx]
+
+    linkage_matrix = linkage(subscribers_scaled, method="ward")
 
     fig_dendrogram = ff.create_dendrogram(
         subscribers_sample,
@@ -2260,7 +2288,7 @@ def _(ff, linkage, mo, np, subscribers_scaled):
     )
 
     mo.ui.plotly(fig_dendrogram)
-    return
+    return (linkage_matrix,)
 
 
 @app.cell(hide_code=True)
@@ -2270,10 +2298,91 @@ def _(mo):
 
     - At distance ~45, we have 2 clusters
     - At distance ~35, we have 3 clusters
-    - At distance ~28, we have 4 clusters
+    - At distance ~28, we have 4 clusters. This validates our choice of k=4.
 
-    Our choice of k=4 is validated by the dendrogram.
+    Now we let's assign some labels to the cluster like we did above with KMeans `fit_predict` (make the cluster profiles) so that we can have actionable results.
+
+    For now, we use the same cut as we did for KMeans.
     """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### Clustering with K=4
+    """)
+    return
+
+
+@app.cell
+def _(fcluster, linkage_matrix, subscribers_with_clusters):
+    hierarchical_labels = fcluster(linkage_matrix, t=4, criterion="maxclust")
+
+    subscribers_with_hclusters = subscribers_with_clusters.assign(
+        h_cluster=hierarchical_labels
+        - 1  # to make hierarchical cluster labels start from 0 like KMeans clusters
+    )
+    return (subscribers_with_hclusters,)
+
+
+@app.cell
+def _(subscribers_with_hclusters):
+    h_cluster_profiles = (
+        subscribers_with_hclusters.groupby("h_cluster")
+        .agg(
+            age=("age", "mean"),
+            balance=("balance", "mean"),
+            job=("job", lambda x: x.mode()[0]),
+            marital=("marital", lambda x: x.mode()[0]),
+            education=("education", lambda x: x.mode()[0]),
+            housing=("housing", lambda x: x.mode()[0]),
+            loan=("loan", lambda x: x.mode()[0]),
+            count=("age", "size"),
+        )
+        .round(2)
+        .sort_values("count", ascending=False)
+    )
+    return (h_cluster_profiles,)
+
+
+@app.cell
+def _(h_cluster_profiles):
+    h_cluster_profiles
+    return
+
+
+@app.cell
+def _(adjusted_rand_score, ff, mo, pd, subscribers_with_hclusters):
+    cross_tab = pd.crosstab(
+        subscribers_with_hclusters["cluster"],
+        subscribers_with_hclusters["h_cluster"],
+        rownames=["KMeans"],
+        colnames=["Hierarchical"],
+    )
+
+    ari = adjusted_rand_score(
+        subscribers_with_hclusters["cluster"],
+        subscribers_with_hclusters["h_cluster"],
+    )
+
+    fig_crosstab = ff.create_annotated_heatmap(
+        z=cross_tab.values,
+        x=[f"H-Cluster {c}" for c in cross_tab.columns],
+        y=[f"KMeans {c}" for c in cross_tab.index],
+        colorscale="Blues",
+        showscale=True,
+    )
+
+    fig_crosstab.update_layout(
+        title=f"KMeans vs Hierarchical Cluster Agreement (ARI = {ari:.3f})",
+        xaxis_title="Hierarchical Cluster",
+        yaxis_title="KMeans Cluster",
+        height=500,
+        width=600,
+    )
+
+    mo.ui.plotly(fig_crosstab)
     return
 
 
