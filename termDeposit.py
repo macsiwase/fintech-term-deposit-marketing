@@ -867,6 +867,18 @@ def _(mo):
 
 
 @app.cell
+def _():
+    # Uncomment this cell and the mo.stop code below if the undersampling process is too slow and crashing your environment.
+
+    # run_undersampling_button = mo.ui.run_button(
+    #     label="Run Undersampling"
+    # )  # The undersampling process can be cpu intensive, so we add a button to allow users to choose when to run it.
+
+    # run_undersampling_button
+    return
+
+
+@app.cell
 def _(
     RandomForestClassifier,
     RandomUnderSampler,
@@ -878,6 +890,11 @@ def _(
     y_test,
     y_train,
 ):
+    # mo.stop(
+    #     not run_undersampling_button.value,
+    #     "Click the button above to run the undersampling process.",
+    # )
+
     undersampled_data = RandomUnderSampler(random_state=42).fit_resample(X_train, y_train)
 
     rf_configs = [
@@ -1386,7 +1403,6 @@ def _(RandomUnderSampler, df_collected, pd, train_test_split, y):
         "housing",
         "loan",
         "contact",
-        "day",
         "month",
         "duration",
         "campaign",
@@ -1641,6 +1657,7 @@ def _(mo):
 
     - Class weight (autoscaled) has the best precision (457/(457+646) ~= 41%) while maintaining ~79% recall. A strong result. This means that the team will spend less time on repeated calls to non-subscribers.
     - The undersampled version has ~90% recall (from cross validation) with a false positive rate of ~14% for non subscribers. A very strong result as well. It catches more subscribers than the autoscaled version but it also means the team will spend more time on repeated calls to non-subscribers.
+    - Weights 5/10 hit 96% recall but at 84-89% false positive rates, making them impractical to use compared to the previous two models.
 
     Ultimately, it's a tradeoff between ML2 flagging less non-subscribers to call (more correct) but at the expense of catching less subscribers or flagging more non-subscribers to call at the expense of catching more subscribers.
 
@@ -1741,7 +1758,6 @@ def _(
         "loan",
         "contact",
         "campaign",
-        "day",
         "duration",
     ]
 
@@ -2274,7 +2290,21 @@ def _(mo):
 
 
 @app.cell
-def _(ff, linkage, mo, np, subscribers_scaled):
+def _(mo):
+    run_dendrogram_button = mo.ui.run_button(label="Run Dendrogram")
+
+    run_dendrogram_button
+    return (run_dendrogram_button,)
+
+
+@app.cell
+def _(ff, linkage, mo, np, run_dendrogram_button, subscribers_scaled):
+    mo.stop(
+        not run_dendrogram_button.value,
+        "Click the button above to run the dendrogram visualization.",
+    )
+
+
     np.random.seed(42)
 
     sample_idx = np.random.choice(len(subscribers_scaled), size=500, replace=False)
@@ -2355,11 +2385,6 @@ def _(subscribers_with_hclusters):
 @app.cell
 def _(h_cluster_profiles):
     h_cluster_profiles
-    return
-
-
-@app.cell
-def _():
     return
 
 
