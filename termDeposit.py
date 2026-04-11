@@ -18,7 +18,12 @@ def _():
     from lazypredict.Supervised import LazyClassifier
     from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
     from sklearn.ensemble import RandomForestClassifier
-    from sklearn.metrics import confusion_matrix, precision_recall_curve, silhouette_score
+    from sklearn.metrics import (
+        confusion_matrix,
+        precision_recall_curve,
+        silhouette_score,
+        adjusted_rand_score,
+    )
     from sklearn.preprocessing import StandardScaler
     from sklearn.cluster import KMeans
     from scipy.cluster.hierarchy import linkage, fcluster
@@ -38,6 +43,7 @@ def _():
         StandardScaler,
         StratifiedKFold,
         XGBClassifier,
+        adjusted_rand_score,
         confusion_matrix,
         cross_val_score,
         db,
@@ -2234,7 +2240,7 @@ def _(mo):
     - Next are young singles with secondary education (736).
     - Finally we have wealthy married retirees with tertiary education and no debt (315).
 
-    These 4 clusters naturally separate based on age, job, type, marital status and housing, aligning with our EDA findings.
+    These 4 clusters naturally separate based on age, job, type, balance, marital status and housing, aligning with our EDA findings.
 
     Before we decide to try other k values, let's try hierarchical clustering using dendrogram first to see what the natural cut points are and how many clusters the data naturally supports.
     """)
@@ -2353,36 +2359,44 @@ def _(h_cluster_profiles):
 
 
 @app.cell
-def _(adjusted_rand_score, ff, mo, pd, subscribers_with_hclusters):
-    cross_tab = pd.crosstab(
+def _():
+    return
+
+
+@app.cell
+def _(adjusted_rand_score, pd, subscribers_with_hclusters):
+    cross_tab_clustering = pd.crosstab(
         subscribers_with_hclusters["cluster"],
         subscribers_with_hclusters["h_cluster"],
-        rownames=["KMeans"],
-        colnames=["Hierarchical"],
+        rownames=["KMeans Cluster"],
+        colnames=["Hierarchical Cluster"],
     )
 
-    ari = adjusted_rand_score(
-        subscribers_with_hclusters["cluster"],
-        subscribers_with_hclusters["h_cluster"],
+    adj_rand = adjusted_rand_score(
+        subscribers_with_hclusters["cluster"], subscribers_with_hclusters["h_cluster"]
     )
+    return adj_rand, cross_tab_clustering
 
-    fig_crosstab = ff.create_annotated_heatmap(
-        z=cross_tab.values,
-        x=[f"H-Cluster {c}" for c in cross_tab.columns],
-        y=[f"KMeans {c}" for c in cross_tab.index],
+
+@app.cell
+def _(adj_rand, cross_tab_clustering, ff, mo):
+    fig_cross_tab = ff.create_annotated_heatmap(
+        z=cross_tab_clustering.values,
+        x=[f"H-Cluster {c}" for c in cross_tab_clustering.columns],
+        y=[f"KMeans {c}" for c in cross_tab_clustering.index],
         colorscale="Blues",
         showscale=True,
     )
 
-    fig_crosstab.update_layout(
-        title=f"KMeans vs Hierarchical Cluster Agreement (ARI = {ari:.3f})",
+    fig_cross_tab.update_layout(
+        title=f"KMeans vs Hierarchical Cluster Agreement (Adjusted Rand Index = {adj_rand:.3f})",
         xaxis_title="Hierarchical Cluster",
         yaxis_title="KMeans Cluster",
-        height=500,
-        width=600,
+        height=800,
+        width=800,
     )
 
-    mo.ui.plotly(fig_crosstab)
+    mo.ui.plotly(fig_cross_tab)
     return
 
 
