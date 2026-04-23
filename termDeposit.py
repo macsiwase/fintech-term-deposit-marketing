@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.2"
 app = marimo.App()
 
 
@@ -27,21 +27,27 @@ def _():
     from sklearn.preprocessing import StandardScaler
     from sklearn.cluster import KMeans
     from scipy.cluster.hierarchy import linkage, fcluster
+    from sklearn.manifold import TSNE
+    from sklearn.decomposition import PCA
     from imblearn.under_sampling import RandomUnderSampler
     from imblearn.combine import SMOTETomek, SMOTEENN
     from imblearn.pipeline import Pipeline as ImbPipeline
     from xgboost import XGBClassifier
+    from umap import UMAP
 
     return (
         ImbPipeline,
         KMeans,
         LazyClassifier,
+        PCA,
         RandomForestClassifier,
         RandomUnderSampler,
         SMOTEENN,
         SMOTETomek,
         StandardScaler,
         StratifiedKFold,
+        TSNE,
+        UMAP,
         XGBClassifier,
         adjusted_rand_score,
         confusion_matrix,
@@ -2298,19 +2304,22 @@ def _(mo):
 
 
 @app.cell
-def _(ff, linkage, mo, np, run_dendrogram_button, subscribers_scaled):
-    mo.stop(
-        not run_dendrogram_button.value,
-        "Click the button above to run the dendrogram visualization.",
-    )
-
-
+def _(linkage, np, subscribers_scaled):
     np.random.seed(42)
 
     sample_idx = np.random.choice(len(subscribers_scaled), size=500, replace=False)
     subscribers_sample = subscribers_scaled[sample_idx]
 
     linkage_matrix = linkage(subscribers_scaled, method="ward")
+    return linkage_matrix, subscribers_sample
+
+
+@app.cell
+def _(ff, linkage, mo, run_dendrogram_button, subscribers_sample):
+    mo.stop(
+        not run_dendrogram_button.value,
+        "Click the button above to run the dendrogram visualization.",
+    )
 
     fig_dendrogram = ff.create_dendrogram(
         subscribers_sample,
@@ -2324,7 +2333,7 @@ def _(ff, linkage, mo, np, run_dendrogram_button, subscribers_scaled):
     )
 
     mo.ui.plotly(fig_dendrogram)
-    return (linkage_matrix,)
+    return
 
 
 @app.cell(hide_code=True)
@@ -2336,7 +2345,7 @@ def _(mo):
     - At distance ~35, we have 3 clusters
     - At distance ~28, we have 4 clusters. This validates our choice of k=4.
 
-    Now we let's assign some labels to the cluster like we did above with KMeans `fit_predict` (make the cluster profiles) so that we can have actionable results.
+    Now let's assign some labels to the cluster like we did above with KMeans `fit_predict` (make the cluster profiles) so that we can have actionable results.
 
     For now, we use the same cut as we did for KMeans.
     """)
@@ -2388,6 +2397,21 @@ def _(h_cluster_profiles):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Hierarchical clustering produces similar archetypes to KMeans but with a very different size distribution:
+
+    - 1761 blue collar married homeowners (61% of all subscribers)
+    - 911 educated married management with tertiary education
+    - 144 married retirees with higher balances
+    - 80 young single students. Small but tightly distinct
+
+    Compared to KMeans's more balanced split (1091/754/736/315), hierarchical clustering concentrates most subscribers into one dominant group and surfaces students as a small, well defined segment.
+    """)
+    return
+
+
 @app.cell
 def _(adjusted_rand_score, pd, subscribers_with_hclusters):
     cross_tab_clustering = pd.crosstab(
@@ -2428,7 +2452,20 @@ def _(adj_rand, cross_tab_clustering, ff, mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Conclusion (WIP)
+    Our ARI of ~0.413 suggests moderate agreement where the two methods identify similar archetypes but differ in how they split certain groups.
+
+    This is expected given that the data lacks clean natural clusters (silhouette peak < 0.3).
+
+    The heatmap confirms this:
+
+    - KMeans 0 (Married Retirees) splits roughly evenly between HCluster 0 and HCluster 1. The methods disagree on how to group these subscribers.
+    - KMeans 1 (Wealthy Married Management) largely maps to HCluster 0 (675 points).
+    - KMeans 2 (Blue Collar Homeowners) maps almost entirely to HCluster 3 (1,080 points) which is the strongest agreement between the two methods.
+    - KMeans 3 (Young Singles) spreads across three hierarchical clusters showing that this is the most fragmented group.
+
+    <br/>
+
+    **Note**: The Adjusted Rand Index (ARI) measures how well two clusterings agree, adjusted for chance (0 = random, 1 = perfect match).
     """)
     return
 
@@ -2436,21 +2473,249 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    In conclusion, we created a multi layered ML system that filters unlikely subscribing customers before a call (ML1), reducing the original list from 40,000 to ~27,000 (~32% reduction) then helping the team identify which customers are worth prioritizing (ML2).
+    # Visualizing the Segmentations
+    """)
+    return
 
-    - ML1 (Pre call filter): XGBoost with undersampling + class weight 2 achieved ~76% recall. Reduced original list by 32%.
-    - ML2 (Optimizer): XGBoost with undersampling only achieved ~91% recall and ~86% accuracy (with 5-fold CV), which exceeds the 81% accuracy target.
 
-    Key Features and segments to prioritize:
+@app.cell
+def _(TSNE, pd, subscribers_scaled, subscribers_with_hclusters):
+    tsne = TSNE(n_components=2, random_state=42, perplexity=30)
+    tsne_embedding = tsne.fit_transform(subscribers_scaled)
 
-    - Students (15.6%) and retirees (10.5%) had high conversion rates.
-    - Management has the highest volume with a high conversion rate.
-    - Timing matters more than duration or demographics. March and October had the highest conversions.
+    kmeans_labels_tsne = {
+        "0": "Married Retirees",
+        "1": "Wealthy Married Management",
+        "2": "Blue Collar Homeowners",
+        "3": "Young Singles",
+    }
 
-    Final Recommendations:
+    h_labels_tsne = {
+        "0": "Married Management",
+        "1": "Married Retirees",
+        "2": "Young Single Students",
+        "3": "Blue Collar Homeowners",
+    }
 
-    - Focus the campaign on March and October
-    - Prioritize management, students, and retirees
+    tsne_df = pd.DataFrame(tsne_embedding, columns=["TSNE_1", "TSNE_2"]).assign(
+        kmeans_cluster=subscribers_with_hclusters.cluster.astype(str).map(
+            kmeans_labels_tsne
+        ),
+        h_cluster=subscribers_with_hclusters.h_cluster.astype(str).map(h_labels_tsne),
+    )
+    return h_labels_tsne, kmeans_labels_tsne, tsne_df
+
+
+@app.cell
+def _(go, h_labels_tsne, kmeans_labels_tsne, make_subplots, mo, tsne_df):
+    fig_tsne = make_subplots(
+        rows=1,
+        cols=2,
+        subplot_titles=["KMeans Clusters", "Hierarchical Clusters"],
+    )
+
+    for cluster_id, label in kmeans_labels_tsne.items():
+        subset_ = tsne_df[tsne_df.kmeans_cluster == label]
+        fig_tsne.add_trace(
+            go.Scatter(
+                x=subset_.TSNE_1,
+                y=subset_.TSNE_2,
+                mode="markers",
+                name=f"{cluster_id}: {label}",
+                legendgroup="kmeans",
+                legendgrouptitle_text="KMeans",
+                showlegend=True,
+            ),
+            row=1,
+            col=1,
+        )
+
+    for cluster_id, label in h_labels_tsne.items():
+        subset__ = tsne_df[tsne_df.h_cluster == label]
+        fig_tsne.add_trace(
+            go.Scatter(
+                x=subset__.TSNE_1,
+                y=subset__.TSNE_2,
+                mode="markers",
+                name=f"{cluster_id}: {label}",
+                legendgroup="hierarchical",
+                legendgrouptitle_text="Hierarchical",
+                showlegend=True,
+            ),
+            row=1,
+            col=2,
+        )
+
+
+    fig_tsne.update_layout(
+        title="t-SNE: KMeans vs Hierarchical Clustering",
+        height=600,
+        width=1200,
+    )
+
+    fig_tsne.update_xaxes(title_text="t-SNE Dimension 1")
+    fig_tsne.update_yaxes(title_text="t-SNE Dimension 2")
+
+    mo.ui.plotly(fig_tsne)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    We see the following:
+
+    - Lots of tightly segmented clusters suggesting that the real underlying structure is more granular than 4 segments (k=4).
+    - Hierarchical clustering shows much cleaner spatial separation where blue collared homeowners (green) covers the majority of the plot and young single students (pink) emerges as a tight isolated group showing that this group is very distinct.
+
+    Now let's compare this result with Principal Component Analysis (PCA) and Uniform Manifold Approximation and Projection (UMAP).
+    """)
+    return
+
+
+@app.cell
+def _(
+    PCA,
+    UMAP,
+    kmeans_labels_tsne,
+    pd,
+    subscribers_scaled,
+    subscribers_with_hclusters,
+    tsne_df,
+):
+    pca_embedding = PCA(n_components=2, random_state=42).fit_transform(subscribers_scaled)
+    umap_embedding = UMAP(n_components=2, random_state=42).fit_transform(subscribers_scaled)
+
+    comparison_df = pd.DataFrame(
+        {
+            "PCA_1": pca_embedding[:, 0],
+            "PCA_2": pca_embedding[:, 1],
+            "TSNE_1": tsne_df.TSNE_1,
+            "TSNE_2": tsne_df.TSNE_2,
+            "UMAP_1": umap_embedding[:, 0],
+            "UMAP_2": umap_embedding[:, 1],
+            "kmeans_cluster": subscribers_with_hclusters.cluster.astype(str).map(
+                kmeans_labels_tsne
+            ),
+        }
+    )
+    (comparison_df,)
+    return (comparison_df,)
+
+
+@app.cell
+def _(comparison_df, go, kmeans_labels_tsne, make_subplots, mo):
+    color_map_dr = {
+        "0": "#636EFA",
+        "1": "#EF553B",
+        "2": "#00CC96",
+        "3": "#AB63FA",
+    }
+
+    panels = [
+        ("PCA_1", "PCA_2", 1),
+        ("TSNE_1", "TSNE_2", 2),
+        ("UMAP_1", "UMAP_2", 3),
+    ]
+
+    fig_dr = make_subplots(
+        rows=1,
+        cols=3,
+        subplot_titles=["PCA", "t-SNE", "UMAP"],
+    )
+
+    for x_col_dr, y_col_dr, col_idx_dr in panels:
+        for cluster_id_dr, label_dr in kmeans_labels_tsne.items():
+            subset_dr = comparison_df[comparison_df.kmeans_cluster == label_dr]
+            fig_dr.add_trace(
+                go.Scatter(
+                    x=subset_dr[x_col_dr],
+                    y=subset_dr[y_col_dr],
+                    mode="markers",
+                    name=f"{cluster_id_dr}: {label_dr}",
+                    legendgroup=label_dr,
+                    showlegend=(col_idx_dr == 1),
+                    marker=dict(color=color_map_dr[cluster_id_dr], size=5),
+                ),
+                row=1,
+                col=col_idx_dr,
+            )
+
+    fig_dr.update_xaxes(title_text="PCA Dimension 1", row=1, col=1)
+    fig_dr.update_yaxes(title_text="PCA Dimension 2", row=1, col=1)
+    fig_dr.update_xaxes(title_text="t-SNE Dimension 1", row=1, col=2)
+    fig_dr.update_yaxes(title_text="t-SNE Dimension 2", row=1, col=2)
+    fig_dr.update_xaxes(title_text="UMAP Dimension 1", row=1, col=3)
+    fig_dr.update_yaxes(title_text="UMAP Dimension 2", row=1, col=3)
+
+    fig_dr.update_layout(
+        title="Dimensionality Reduction Comparison (colored by KMeans, k=4)",
+        height=800,
+        width=2000,
+        legend=dict(title="KMeans Cluster"),
+    )
+
+    mo.ui.plotly(fig_dr)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Comparing the three methods, we see that:
+
+    - PCA shows heavy overlap between clusters, confirming that linear projection can't cleanly separate the segments.
+    - t-SNE and UMAP reveal many tight subclusters, showing that the real feature space structure is finer than k=4.
+    - The same KMeans cluster appears as multiple spatially disconnected islands, meaning KMeans is producing semantically coherent but spatially fragmented groups.e.g. "Blue Collar Homeowners" captures multiple sub types that share a demographic profile but live in different regions of the feature space.
+
+    **Note:** Our silhouette analysis never exceeded 0.29 at any k, well below the 0.5 threshold for well separated clusters. This means the data doesn't have clean natural clusters regardless of k. We chose k=4 as a pragmatic compromise which was statistically reasonable (validated by the dendrogram) and gives the team a manageable number of actionable segments. Going to k=10 would provide marginally better statistical separation but would be impractical for campaign targeting.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Conclusion
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    We built a three part system to address the 7% subscriber rate problem:
+
+    ML1: Pre call filter (XGBoost + undersampling + class weight 2)
+
+    - Catches ~76% of potential subscribers using only pre call features
+    - Reduces the call list from 40,000 to ~27,000 (~32% reduction)
+
+    ML2: Call optimizer (XGBoost + undersampling)
+
+    - Catches ~91% of subscribers with ~86% accuracy (5-fold CV), exceeding the 81% target
+    - Uses all features including call duration and campaign context
+
+    Customer Segmentation: KMeans + Hierarchical Clustering
+
+    - Identified 4 interpretable segments: Wealthy Married Management, Blue Collar Homeowners, Young Singles, and Married Retirees
+    - Validated with hierarchical clustering (dendrogram) and cross method visualization (PCA, t-SNE, UMAP)
+    - Caveat: silhouette scores stayed below 0.3 at all k values meaning segments are directional rather than perfectly separated
+
+    <br/>
+
+    Key Findings
+
+    - Timing matters most: March and October had the highest conversions and dominated ML2's feature importance.
+    - High conversion segments: Students (15.6%) and retirees (10.5%) had the highest conversion rates. Management has the highest volume and a strong conversion rate.
+    - Pre call features contribute roughly equally: no single demographic predictor dominates which explains ML1's lower recall compared to ML2.
+
+    Final Recommendations
+
+    1. Deploy ML1 to filter the call list before each campaign saving ~13,000 unnecessary calls.
+    2. Use ML2 during campaigns to guide follow up decisions on live calls.
+    3. Concentrate campaigns in March and October (the two highest converting months).
+    4. Prioritize management, students, and retirees (highestconversion segments).
     """)
     return
 
